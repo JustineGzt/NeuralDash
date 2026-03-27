@@ -2,23 +2,25 @@ import { useEffect, useMemo, useState } from 'react';
 import { TopHeader } from '../components/TopHeader';
 import { useMissions } from '../hooks/useMissions';
 import { useInventory } from '../hooks/useInventory';
+import { useAuth } from '../hooks/useAuth';
+import { useWallet } from '../hooks/useWallet';
+import {
+  getStorageScopeId,
+  getScopedStorageItem,
+  removeScopedStorageItem,
+  setScopedStorageItem,
+} from '../utils/userStorage';
+import {
+  createSpaceBattle,
+  getShipCombatant,
+  resolveSpaceBattleTurn,
+  SPACE_ENEMIES,
+  type ShipAction,
+  type SpaceBattleState,
+} from '../utils/spaceBattle';
 
-type Action = 'attack' | 'defend' | 'evade';
-
-type BattleState = {
-  active: boolean;
-  enemyName: string;
-  playerHp: number;
-  playerMaxHp: number;
-  playerFuel: number;
-  playerMaxFuel: number;
-  enemyHp: number;
-  enemyMaxHp: number;
-  currentAction: Action | null;
-  enemyAction: Action | null;
-  battleLog: string[];
-  turn: number;
-};
+const XP_STORAGE_KEY = 'playerXpTotal';
+const XP_EVENT = 'xp:updated';
 
 const STAGES = [
   { id: 's1', title: 'Portail Echo', status: 'Actif', progress: 68 },
@@ -112,13 +114,16 @@ const MISSION_REQUIREMENTS: Record<string, Array<{ id: string; name: string; ico
 };
 
 export const Aventure = () => {
+  const { user, loading: authLoading } = useAuth();
   const { quests, completeMission } = useMissions();
   const { inventory } = useInventory();
+  const { addCredits } = useWallet();
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [objectives, setObjectives] = useState(INITIAL_OBJECTIVES);
   const [equippedShipId, setEquippedShipId] = useState<string | null>(null);
-  const [battle, setBattle] = useState<BattleState | null>(null);
+  const [battle, setBattle] = useState<SpaceBattleState | null>(null);
+  const storageScope = getStorageScopeId(user?.uid);
 
   const adventureMissions = quests.filter((quest) =>
     quest.description && ADVENTURE_TARGETS.includes(quest.description)
@@ -144,25 +149,26 @@ export const Aventure = () => {
     [inventory]
   );
 
-  useEffect(() => {
-    const stored = localStorage.getItem('equippedShip');
-    if (stored) {
-      Promise.resolve().then(() => {
-        setEquippedShipId(stored);
-      });
-    }
-  }, []);
+  const equippedShip = useMemo(
+    () => shipInventory.find((ship) => ship.id === equippedShipId) ?? null,
+    [equippedShipId, shipInventory]
+  );
 
   useEffect(() => {
+    if (authLoading) return;
+    const stored = getScopedStorageItem('equippedShip', user?.uid);
+    setEquippedShipId(stored ?? null);
+  }, [authLoading, user?.uid]);
+
+  useEffect(() => {
+    if (authLoading) return;
     if (!equippedShipId) return;
     const stillOwned = shipInventory.some((ship) => ship.id === equippedShipId);
     if (!stillOwned) {
-      Promise.resolve().then(() => {
-        setEquippedShipId(null);
-        localStorage.removeItem('equippedShip');
-      });
+      setEquippedShipId(null);
+      removeScopedStorageItem('equippedShip', user?.uid);
     }
-  }, [equippedShipId, shipInventory]);
+  }, [authLoading, equippedShipId, shipInventory, user?.uid]);
 
   const hasAnyShip = shipInventory.length > 0;
 
@@ -190,95 +196,58 @@ export const Aventure = () => {
 
   const handleEquipShip = (shipId: string) => {
     setEquippedShipId(shipId);
-    localStorage.setItem('equippedShip', shipId);
+    setScopedStorageItem('equippedShip', shipId, user?.uid);
     setSuccessMessage('Vaisseau equipe.');
     setTimeout(() => setSuccessMessage(null), 2000);
   };
 
-  const startBattle = (team: string) => {
-    if (!equippedShipId) return;
-    setBattle({
-      active: true,
-      enemyName: team,
-      playerHp: 100,
-      playerMaxHp: 100,
-      playerFuel: 100,
-      playerMaxFuel: 100,
-      enemyHp: 80,
-      enemyMaxHp: 80,
-      currentAction: null,
-      enemyAction: null,
-      battleLog: [`Combat contre ${team} commence!`],
-      turn: 0
-    });
+  const grantBattleRewards = (creditsGain: number, xpGain: number) => {
+    if (creditsGain > 0) {
+      addCredits(creditsGain);
+    }
+
+    if (xpGain > 0) {
+      const currentXp = Number(getScopedStorageItem(XP_STORAGE_KEY, user?.uid)) || 0;
+      const nextXp = currentXp + xpGain;
+      setScopedStorageItem(XP_STORAGE_KEY, String(nextXp), user?.uid);
+      window.dispatchEvent(
+        new CustomEvent(XP_EVENT, {
+          detail: {
+            totalXp: nextXp,
+            gain: xpGain,
+            scope: storageScope,
+          },
+        })
+      );
+    }
   };
 
-  const resolveBattle = (playerAction: Action) => {
+  const startBattle = (enemyId: string) => {
+    if (!equippedShip) return;
+    const nextBattle = createSpaceBattle(equippedShip, enemyId);
+    if (!nextBattle) return;
+    setBattle(nextBattle);
+  };
+
+  const resolveBattle = (playerAction: ShipAction) => {
     if (!battle) return;
 
-    const enemyAction: Action = ['attack', 'defend', 'evade'][Math.floor(Math.random() * 3)] as Action;
-    const newLog = [...battle.battleLog];
-    let playerDamage = 0;
-    let enemyDamage = 0;
+    const nextBattle = resolveSpaceBattleTurn(battle, playerAction);
 
-    // Joueur attaque
-    if (playerAction === 'attack') {
-      if (battle.playerFuel < 15) {
-        newLog.push('❌ Carburant insuffisant pour attaquer!');
-      } else {
-        playerDamage = enemyAction === 'defend' ? 12 : enemyAction === 'evade' ? 0 : 25;
-        if (playerDamage > 0) newLog.push(`🎯 Attaque! ${playerDamage} degats.`);
-        else newLog.push('⚠️ Ennemi esquive!');
-      }
-    } else if (playerAction === 'defend') {
-      newLog.push('🛡️ Defense activee.');
-    } else {
-      newLog.push('⚡ Esquive tentee.');
+    if (!battle.winner && nextBattle.winner === 'player') {
+      grantBattleRewards(nextBattle.rewardCredits, nextBattle.rewardXp);
+      setSuccessMessage(
+        `Combat gagne: +${nextBattle.rewardCredits} credits • +${nextBattle.rewardXp} XP`
+      );
+      setTimeout(() => setSuccessMessage(null), 3200);
     }
 
-    // Ennemi attaque
-    if (enemyAction === 'attack') {
-      const baseEnemyDmg = 20;
-      if (playerAction === 'defend') enemyDamage = Math.floor(baseEnemyDmg * 0.5);
-      else if (playerAction === 'evade') enemyDamage = Math.random() > 0.4 ? 0 : baseEnemyDmg;
-      else enemyDamage = baseEnemyDmg;
-      if (enemyDamage > 0) newLog.push(`⚔️ Ennemi attaque! ${enemyDamage} degats.`);
-      else newLog.push('✓ Esquive reussie!');
-    } else if (enemyAction === 'defend') {
-      newLog.push('🛡️ Ennemi se defend.');
-    } else {
-      newLog.push('⚡ Ennemi esquive.');
+    if (!battle.winner && nextBattle.winner === 'enemy') {
+      setErrorMessage('Combat perdu. Reparez le vaisseau et tentez une autre approche.');
+      setTimeout(() => setErrorMessage(null), 3200);
     }
 
-    const playerFuelCost = playerAction === 'attack' ? 15 : 8;
-    const newPlayerHp = Math.max(0, battle.playerHp - enemyDamage);
-    const newPlayerFuel = Math.max(0, battle.playerFuel - playerFuelCost);
-    const newEnemyHp = Math.max(0, battle.enemyHp - playerDamage);
-
-    const battleOver = newPlayerHp === 0 || newEnemyHp === 0;
-    if (battleOver) {
-      if (newEnemyHp === 0) {
-        newLog.push('🎉 Victoire!');
-        setSuccessMessage('Combat gagne!');
-        setTimeout(() => setSuccessMessage(null), 2500);
-      } else {
-        newLog.push('💀 Defaite...');
-        setErrorMessage('Combat perdu.');
-        setTimeout(() => setErrorMessage(null), 2500);
-      }
-    }
-
-    setBattle({
-      ...battle,
-      playerHp: newPlayerHp,
-      playerFuel: newPlayerFuel,
-      enemyHp: newEnemyHp,
-      currentAction: playerAction,
-      enemyAction,
-      battleLog: newLog,
-      turn: battle.turn + 1,
-      active: !battleOver
-    });
+    setBattle(nextBattle);
   };
 
   const closeBattle = () => {
@@ -325,11 +294,11 @@ export const Aventure = () => {
             <section className="rounded-2xl border border-amber-300/30 bg-[#0f141c]/90 p-6 shadow-[0_0_30px_rgba(251,191,36,0.15)]">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-[10px] uppercase tracking-[0.45em] text-amber-200/70">Mission en cours</p>
+                  <p className="text-[10px] uppercase tracking-[0.45em] text-amber-100/95">Mission en cours</p>
                   <h1 className="mt-2 text-2xl md:text-3xl font-black uppercase text-amber-100">Operation Sables Or</h1>
                 </div>
                 <div className="text-right">
-                  <p className="text-[10px] uppercase tracking-[0.35em] text-amber-200/70">Energie</p>
+                  <p className="text-[10px] uppercase tracking-[0.35em] text-amber-100/95">Energie</p>
                   <p className="text-lg font-semibold text-amber-200">74%</p>
                 </div>
               </div>
@@ -337,7 +306,7 @@ export const Aventure = () => {
               <div className="mt-6 grid gap-4 md:grid-cols-3">
                 {STAGES.map((stage) => (
                   <div key={stage.id} className="rounded-xl border border-amber-300/20 bg-black/40 p-4">
-                    <p className="text-[10px] uppercase tracking-[0.3em] text-amber-200/60">{stage.title}</p>
+                    <p className="text-[10px] uppercase tracking-[0.3em] text-amber-100/90">{stage.title}</p>
                     <p className="mt-2 text-sm font-semibold text-amber-100">{stage.status}</p>
                     <div className="mt-3 h-2 rounded-full border border-amber-300/20 bg-black/60 overflow-hidden">
                       <div
@@ -345,7 +314,7 @@ export const Aventure = () => {
                         style={{ width: `${stage.progress}%` }}
                       />
                     </div>
-                    <p className="mt-2 text-[9px] uppercase tracking-[0.25em] text-amber-200/50">{stage.progress}%</p>
+                    <p className="mt-2 text-[9px] uppercase tracking-[0.25em] text-amber-100/90">{stage.progress}%</p>
                   </div>
                 ))}
               </div>
@@ -353,10 +322,10 @@ export const Aventure = () => {
 
             <section className="space-y-4">
               <div className="rounded-2xl border border-amber-300/20 bg-black/50 p-5">
-                <p className="text-[10px] uppercase tracking-[0.4em] text-amber-200/60">Objectifs immediats</p>
+                <p className="text-[10px] uppercase tracking-[0.4em] text-amber-100/90">Objectifs immediats</p>
                 <div className="mt-4 space-y-3">
                   {objectives.length === 0 ? (
-                    <p className="text-sm text-amber-200/60">Tous les objectifs sont completes.</p>
+                    <p className="text-sm text-amber-100/85">Tous les objectifs sont completes.</p>
                   ) : (
                     objectives.map((target) => {
                       const canComplete = canCompleteObjective(target);
@@ -382,7 +351,7 @@ export const Aventure = () => {
 
                           {(target.requirements.length > 0 || target.requiresAnyShip) && (
                             <div className="mt-3">
-                              <p className="text-[9px] uppercase tracking-[0.35em] text-amber-200/50">Objets requis</p>
+                              <p className="text-[9px] uppercase tracking-[0.35em] text-amber-100/90">Objets requis</p>
                               <div className="mt-2 flex flex-wrap gap-2">
                                 {target.requiresAnyShip && (
                                   <div
@@ -423,7 +392,7 @@ export const Aventure = () => {
               </div>
 
               <div className="rounded-2xl border border-amber-300/20 bg-black/50 p-5">
-                <p className="text-[10px] uppercase tracking-[0.4em] text-amber-200/60">Equipe active</p>
+                <p className="text-[10px] uppercase tracking-[0.4em] text-amber-100/90">Equipe active</p>
                 <div className="mt-4 space-y-3">
                   {CREW.map((member) => (
                     <div key={member.id} className="rounded-lg border border-amber-300/15 bg-black/40 px-3 py-2">
@@ -431,7 +400,7 @@ export const Aventure = () => {
                         <span className="text-sm text-amber-100">{member.name}</span>
                         <span className="text-[9px] uppercase tracking-[0.3em] text-amber-300/80">{member.role}</span>
                       </div>
-                      <p className="mt-1 text-[10px] text-amber-200/60 uppercase tracking-[0.25em]">{member.status}</p>
+                      <p className="mt-1 text-[10px] text-amber-100/85 uppercase tracking-[0.25em]">{member.status}</p>
                     </div>
                   ))}
                 </div>
@@ -441,14 +410,14 @@ export const Aventure = () => {
 
           <section className="mt-8 rounded-2xl border border-amber-300/20 bg-black/40 p-6">
             <div className="flex items-center justify-between">
-              <p className="text-[10px] uppercase tracking-[0.4em] text-amber-200/60">Anomalies detectees</p>
+              <p className="text-[10px] uppercase tracking-[0.4em] text-amber-100/90">Anomalies detectees</p>
               <span className="text-[9px] uppercase tracking-[0.4em] text-amber-300">Niveau 2</span>
             </div>
             <div className="mt-4 grid gap-3 md:grid-cols-3">
               {['Echo breche', 'Flux instable', 'Signal parasite'].map((label) => (
                 <div key={label} className="rounded-lg border border-amber-300/20 bg-black/60 p-4">
                   <p className="text-sm text-amber-100 font-semibold">{label}</p>
-                  <p className="mt-2 text-[10px] uppercase tracking-[0.3em] text-amber-200/60">Analyse en attente</p>
+                  <p className="mt-2 text-[10px] uppercase tracking-[0.3em] text-amber-100/90">Analyse en attente</p>
                 </div>
               ))}
             </div>
@@ -456,14 +425,14 @@ export const Aventure = () => {
 
           <section className="mt-8 rounded-2xl border border-amber-300/20 bg-black/50 p-6">
             <div className="flex items-center justify-between">
-              <p className="text-[10px] uppercase tracking-[0.4em] text-amber-200/60">Missions neurales</p>
+              <p className="text-[10px] uppercase tracking-[0.4em] text-amber-100/90">Missions neurales</p>
               <span className="text-[9px] uppercase tracking-[0.4em] text-amber-300">
                 {adventureMissions.length} trouvees
               </span>
             </div>
 
             {adventureMissions.length === 0 ? (
-              <p className="mt-4 text-sm text-amber-200/60">Aucune mission chargee pour l'aventure.</p>
+              <p className="mt-4 text-sm text-amber-100/85">Aucune mission chargee pour l'aventure.</p>
             ) : (
               <div className="mt-4 space-y-3">
                 {adventureMissions.map((mission) => (
@@ -520,7 +489,7 @@ export const Aventure = () => {
                       </div>
                     </div>
                     {mission.reward && (
-                      <div className="mt-3 text-[10px] uppercase tracking-[0.25em] text-amber-200/70">
+                <div className="mt-3 text-[10px] uppercase tracking-[0.25em] text-amber-100/95">
                         Recompense: {mission.reward.icon} {mission.reward.name}
                       </div>
                     )}
@@ -543,26 +512,39 @@ export const Aventure = () => {
                 <div className="mt-4 grid gap-3 md:grid-cols-3">
                   {shipInventory.map((ship) => (
                     <div key={ship.id} className="rounded-xl border border-amber-300/20 bg-black/60 p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-lg">{ship.icon}</p>
-                          <p className="text-sm font-semibold text-amber-100">{ship.name}</p>
-                          <p className="mt-1 text-[10px] uppercase tracking-[0.25em] text-amber-200/60">{ship.type}</p>
-                        </div>
-                        <button
-                          onClick={() => handleEquipShip(ship.id)}
-                          className={`rounded-lg border px-2.5 py-1 text-[9px] uppercase tracking-[0.3em] transition ${
-                            equippedShipId === ship.id
-                              ? 'border-emerald-300/40 bg-emerald-400/10 text-emerald-200'
-                              : 'border-amber-300/40 bg-amber-400/10 text-amber-100 hover:bg-amber-400/20'
-                          }`}
-                        >
-                          {equippedShipId === ship.id ? 'Equipe' : 'Equiper'}
-                        </button>
-                      </div>
-                      {ship.desc && (
-                        <p className="mt-2 text-[10px] text-amber-200/60">{ship.desc}</p>
-                      )}
+                      {(() => {
+                        const profile = getShipCombatant(ship);
+                        return (
+                          <>
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="text-lg">{ship.icon}</p>
+                                <p className="text-sm font-semibold text-amber-100">{ship.name}</p>
+                                <p className="mt-1 text-[10px] uppercase tracking-[0.25em] text-amber-200/60">{ship.type}</p>
+                              </div>
+                              <button
+                                onClick={() => handleEquipShip(ship.id)}
+                                className={`rounded-lg border px-2.5 py-1 text-[9px] uppercase tracking-[0.3em] transition ${
+                                  equippedShipId === ship.id
+                                    ? 'border-emerald-300/40 bg-emerald-400/10 text-emerald-200'
+                                    : 'border-amber-300/40 bg-amber-400/10 text-amber-100 hover:bg-amber-400/20'
+                                }`}
+                              >
+                                {equippedShipId === ship.id ? 'Equipe' : 'Equiper'}
+                              </button>
+                            </div>
+                            {ship.desc && (
+                              <p className="mt-2 text-[10px] text-amber-200/60">{ship.desc}</p>
+                            )}
+                            <div className="mt-3 grid grid-cols-2 gap-2 text-[9px] uppercase tracking-[0.22em] text-amber-200/70">
+                              <div className="rounded-lg border border-amber-300/15 bg-black/40 px-2 py-2">Coque {profile.maxHull}</div>
+                              <div className="rounded-lg border border-amber-300/15 bg-black/40 px-2 py-2">Bouclier {profile.maxShield}</div>
+                              <div className="rounded-lg border border-amber-300/15 bg-black/40 px-2 py-2">Attaque {profile.attack}</div>
+                              <div className="rounded-lg border border-amber-300/15 bg-black/40 px-2 py-2">Evasion {profile.evasion}</div>
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   ))}
                 </div>
@@ -578,12 +560,26 @@ export const Aventure = () => {
               </div>
 
               <div className="mt-4 grid gap-3 md:grid-cols-3">
-                {['Escouade Orion', 'Garde Nebula', 'Fregate Vesper'].map((team) => (
-                  <div key={team} className="rounded-lg border border-amber-300/20 bg-black/60 p-4">
-                    <p className="text-sm text-amber-100 font-semibold">{team}</p>
-                    <p className="mt-2 text-[10px] uppercase tracking-[0.3em] text-amber-200/60">Menace moderee</p>
+                {SPACE_ENEMIES.map((enemy) => (
+                  <div key={enemy.id} className="rounded-lg border border-amber-300/20 bg-black/60 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-lg">{enemy.icon}</p>
+                        <p className="text-sm text-amber-100 font-semibold">{enemy.name}</p>
+                      </div>
+                      <span className="rounded-full border border-red-300/30 bg-red-500/10 px-2 py-1 text-[9px] uppercase tracking-[0.3em] text-red-100">
+                        {enemy.threat}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-[10px] text-amber-200/65">{enemy.description}</p>
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-[9px] uppercase tracking-[0.22em] text-amber-200/70">
+                      <div className="rounded-lg border border-amber-300/15 bg-black/40 px-2 py-2">Coque {enemy.hull}</div>
+                      <div className="rounded-lg border border-amber-300/15 bg-black/40 px-2 py-2">Bouclier {enemy.shield}</div>
+                      <div className="rounded-lg border border-amber-300/15 bg-black/40 px-2 py-2">+{enemy.rewardCredits} cr</div>
+                      <div className="rounded-lg border border-amber-300/15 bg-black/40 px-2 py-2">+{enemy.rewardXp} XP</div>
+                    </div>
                     <button
-                      onClick={() => startBattle(team)}
+                      onClick={() => startBattle(enemy.id)}
                       disabled={!equippedShipId}
                       className={`mt-3 w-full rounded-lg border px-3 py-1 text-[9px] uppercase tracking-[0.3em] transition ${
                         equippedShipId
@@ -605,7 +601,12 @@ export const Aventure = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
           <div className="rounded-2xl border border-amber-300/40 bg-[#0b0f14]/95 backdrop-blur-xl p-8 w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-[0_0_60px_rgba(251,191,36,0.3)]">
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-black uppercase text-amber-100">Combat — {battle.enemyName}</h2>
+              <div>
+                <h2 className="text-xl font-black uppercase text-amber-100">Combat — {battle.enemyName}</h2>
+                <p className="mt-1 text-[10px] uppercase tracking-[0.3em] text-amber-200/60">
+                  {battle.shipName} • menace {battle.enemyThreat}
+                </p>
+              </div>
               <button
                 onClick={closeBattle}
                 className="text-amber-300/60 hover:text-amber-200 text-2xl"
@@ -620,26 +621,43 @@ export const Aventure = () => {
                 <div className="mt-2">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm text-emerald-100">Vie</span>
-                    <span className="text-sm font-bold text-emerald-200">{battle.playerHp}/{battle.playerMaxHp}</span>
+                    <span className="text-sm font-bold text-emerald-200">{battle.player.hull}/{battle.player.maxHull}</span>
                   </div>
                   <div className="h-2 rounded-full border border-emerald-300/30 bg-black/60 overflow-hidden">
                     <div
                       className="h-full bg-linear-to-r from-emerald-400 to-lime-300 transition-all duration-500"
-                      style={{ width: `${(battle.playerHp / battle.playerMaxHp) * 100}%` }}
+                      style={{ width: `${(battle.player.hull / battle.player.maxHull) * 100}%` }}
+                    />
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm text-cyan-100">Bouclier</span>
+                    <span className="text-sm font-bold text-cyan-200">{battle.player.shield}/{battle.player.maxShield}</span>
+                  </div>
+                  <div className="h-2 rounded-full border border-cyan-300/30 bg-black/60 overflow-hidden">
+                    <div
+                      className="h-full bg-linear-to-r from-cyan-400 to-sky-300 transition-all duration-500"
+                      style={{ width: `${battle.player.maxShield > 0 ? (battle.player.shield / battle.player.maxShield) * 100 : 0}%` }}
                     />
                   </div>
                 </div>
                 <div className="mt-3">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm text-amber-100">Carburant</span>
-                    <span className="text-sm font-bold text-amber-200">{battle.playerFuel}/{battle.playerMaxFuel}</span>
+                    <span className="text-sm font-bold text-amber-200">{battle.player.fuel}/{battle.player.maxFuel}</span>
                   </div>
                   <div className="h-2 rounded-full border border-amber-300/30 bg-black/60 overflow-hidden">
                     <div
                       className="h-full bg-linear-to-r from-amber-400 to-orange-300 transition-all duration-500"
-                      style={{ width: `${(battle.playerFuel / battle.playerMaxFuel) * 100}%` }}
+                      style={{ width: `${(battle.player.fuel / battle.player.maxFuel) * 100}%` }}
                     />
                   </div>
+                </div>
+                <div className="mt-4 grid grid-cols-3 gap-2 text-[9px] uppercase tracking-[0.22em] text-emerald-200/75">
+                  <div className="rounded-lg border border-white/10 bg-black/40 px-2 py-2">Attaque {battle.player.attack}</div>
+                  <div className="rounded-lg border border-white/10 bg-black/40 px-2 py-2">Precision {battle.player.precision}</div>
+                  <div className="rounded-lg border border-white/10 bg-black/40 px-2 py-2">Evasion {battle.player.evasion}</div>
                 </div>
               </div>
 
@@ -648,14 +666,61 @@ export const Aventure = () => {
                 <div className="mt-2">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm text-red-100">Vie</span>
-                    <span className="text-sm font-bold text-red-200">{battle.enemyHp}/{battle.enemyMaxHp}</span>
+                    <span className="text-sm font-bold text-red-200">{battle.enemy.hull}/{battle.enemy.maxHull}</span>
                   </div>
                   <div className="h-2 rounded-full border border-red-300/30 bg-black/60 overflow-hidden">
                     <div
                       className="h-full bg-linear-to-r from-red-400 to-orange-400 transition-all duration-500"
-                      style={{ width: `${(battle.enemyHp / battle.enemyMaxHp) * 100}%` }}
+                      style={{ width: `${(battle.enemy.hull / battle.enemy.maxHull) * 100}%` }}
                     />
                   </div>
+                </div>
+                <div className="mt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm text-orange-100">Bouclier</span>
+                    <span className="text-sm font-bold text-orange-200">{battle.enemy.shield}/{battle.enemy.maxShield}</span>
+                  </div>
+                  <div className="h-2 rounded-full border border-orange-300/30 bg-black/60 overflow-hidden">
+                    <div
+                      className="h-full bg-linear-to-r from-orange-400 to-amber-300 transition-all duration-500"
+                      style={{ width: `${battle.enemy.maxShield > 0 ? (battle.enemy.shield / battle.enemy.maxShield) * 100 : 0}%` }}
+                    />
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm text-amber-100">Carburant</span>
+                    <span className="text-sm font-bold text-amber-200">{battle.enemy.fuel}/{battle.enemy.maxFuel}</span>
+                  </div>
+                  <div className="h-2 rounded-full border border-amber-300/30 bg-black/60 overflow-hidden">
+                    <div
+                      className="h-full bg-linear-to-r from-amber-400 to-yellow-300 transition-all duration-500"
+                      style={{ width: `${(battle.enemy.fuel / battle.enemy.maxFuel) * 100}%` }}
+                    />
+                  </div>
+                </div>
+                <div className="mt-4 grid grid-cols-3 gap-2 text-[9px] uppercase tracking-[0.22em] text-red-100/75">
+                  <div className="rounded-lg border border-white/10 bg-black/40 px-2 py-2">Attaque {battle.enemy.attack}</div>
+                  <div className="rounded-lg border border-white/10 bg-black/40 px-2 py-2">Precision {battle.enemy.precision}</div>
+                  <div className="rounded-lg border border-white/10 bg-black/40 px-2 py-2">Evasion {battle.enemy.evasion}</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mb-6 rounded-lg border border-amber-300/20 bg-black/50 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-[10px] uppercase tracking-[0.3em] text-amber-200/60">Lecture tactique</p>
+                  <p className="mt-1 text-sm text-amber-100/85">{battle.enemyDescription}</p>
+                </div>
+                <div className="flex gap-2 text-[9px] uppercase tracking-[0.25em]">
+                  <span className="rounded-full border border-amber-300/20 bg-amber-400/10 px-2 py-1 text-amber-100">Tour {battle.turn}</span>
+                  <span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-2 py-1 text-cyan-100">
+                    Special joueur {battle.player.specialCooldown > 0 ? `CD ${battle.player.specialCooldown}` : 'pret'}
+                  </span>
+                  <span className="rounded-full border border-red-300/20 bg-red-500/10 px-2 py-1 text-red-100">
+                    Special ennemi {battle.enemy.specialCooldown > 0 ? `CD ${battle.enemy.specialCooldown}` : 'pret'}
+                  </span>
                 </div>
               </div>
             </div>
@@ -672,17 +737,17 @@ export const Aventure = () => {
             </div>
 
             {battle.active ? (
-              <div className="grid gap-3 grid-cols-3">
+              <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
                 <button
                   onClick={() => resolveBattle('attack')}
-                  disabled={battle.playerFuel < 15}
+                  disabled={battle.player.fuel < 14}
                   className={`rounded-lg border px-4 py-2 text-[9px] uppercase tracking-[0.3em] font-bold transition ${
-                    battle.playerFuel >= 15
+                    battle.player.fuel >= 14
                       ? 'border-red-300/40 bg-red-500/10 text-red-100 hover:bg-red-500/20'
                       : 'border-white/10 bg-white/5 text-white/30 cursor-not-allowed'
                   }`}
                 >
-                  ⚔️ Attaquer (15)
+                  ⚔️ Salve (14)
                 </button>
                 <button
                   onClick={() => resolveBattle('defend')}
@@ -694,14 +759,30 @@ export const Aventure = () => {
                   onClick={() => resolveBattle('evade')}
                   className="rounded-lg border border-cyan-300/40 bg-cyan-500/10 text-cyan-100 px-4 py-2 text-[9px] uppercase tracking-[0.3em] font-bold hover:bg-cyan-500/20 transition"
                 >
-                  ⚡ Esquiver (8)
+                  ⚡ Esquiver (6)
+                </button>
+                <button
+                  onClick={() => resolveBattle('overload')}
+                  disabled={battle.player.fuel < battle.player.specialCost || battle.player.specialCooldown > 0}
+                  className={`rounded-lg border px-4 py-2 text-[9px] uppercase tracking-[0.3em] font-bold transition ${
+                    battle.player.fuel >= battle.player.specialCost && battle.player.specialCooldown === 0
+                      ? 'border-amber-300/40 bg-amber-500/10 text-amber-100 hover:bg-amber-500/20'
+                      : 'border-white/10 bg-white/5 text-white/30 cursor-not-allowed'
+                  }`}
+                >
+                  ☄️ {battle.player.specialLabel} ({battle.player.specialCost})
                 </button>
               </div>
             ) : (
               <div className="text-center">
                 <p className="text-lg font-bold text-amber-100 mb-4">
-                  {battle.playerHp === 0 ? '💀 Defaite' : '🎉 Victoire'}
+                  {battle.winner === 'player' ? '🎉 Victoire' : '💀 Defaite'}
                 </p>
+                {battle.winner === 'player' && (
+                  <p className="mb-4 text-sm text-emerald-200">
+                    Recompenses obtenues: +{battle.rewardCredits} credits et +{battle.rewardXp} XP
+                  </p>
+                )}
                 <button
                   onClick={closeBattle}
                   className="rounded-lg border border-amber-300/40 bg-amber-500/10 text-amber-100 px-6 py-2 text-[9px] uppercase tracking-[0.3em] font-bold hover:bg-amber-500/20 transition"

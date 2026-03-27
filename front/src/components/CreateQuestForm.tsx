@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { CATEGORIES, DIFFICULTIES } from '../constants/quest';
 
 type CreateQuestFormProps = {
-  onCreate: (title: string, category: string, difficulty: string, description?: string) => void;
+  onCreate: (title: string, category: string, difficulty: string, description?: string) => Promise<boolean>;
 };
 
 export const CreateQuestForm = ({ onCreate }: CreateQuestFormProps) => {
@@ -10,14 +10,26 @@ export const CreateQuestForm = ({ onCreate }: CreateQuestFormProps) => {
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('');
   const [difficulty, setDifficulty] = useState('');
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = () => {
-    if (!title.trim() || !category || !difficulty) return;
-    onCreate(title, category, difficulty, description);
-    setTitle('');
-    setDescription('');
-    setCategory('');
-    setDifficulty('');
+  const handleSubmit = async () => {
+    if (!title.trim() || !category || !difficulty || isSubmitting) return;
+    
+    setIsSubmitting(true);
+    const success = await onCreate(title, category, difficulty, description);
+    setIsSubmitting(false);
+    
+    if (success) {
+      setTitle('');
+      setDescription('');
+      setCategory('');
+      setDifficulty('');
+      setShowSuccess(true);
+      
+      // Masquer le message après 3 secondes
+      setTimeout(() => setShowSuccess(false), 3000);
+    }
   };
 
   return (
@@ -99,14 +111,20 @@ export const CreateQuestForm = ({ onCreate }: CreateQuestFormProps) => {
         </div>
       </div>
 
-      <div className="mt-6 flex justify-center">
+      <div className="mt-6 flex flex-col items-center gap-3">
         <button
           onClick={handleSubmit}
-          disabled={!title.trim() || !category || !difficulty}
+          disabled={!title.trim() || !category || !difficulty || isSubmitting}
           className="rounded-xl border border-fuchsia-200/60 px-6 py-2 text-[11px] font-semibold uppercase tracking-[0.4em] text-fuchsia-100/90 shadow-[0_0_16px_rgba(232,121,249,0.4)] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-fuchsia-400/20 transition-all"
         >
-          ✨ Créer la mission
+          {isSubmitting ? '⏳ Création...' : '✨ Créer la mission'}
         </button>
+        
+        {showSuccess && (
+          <div className="text-center text-sm text-green-400 animate-pulse">
+            ✅ Mission créée avec succès !
+          </div>
+        )}
       </div>
     </section>
   );

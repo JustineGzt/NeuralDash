@@ -10,6 +10,7 @@ export interface Reward {
 
 export interface Mission {
   id?: string;
+  userId: string;
   title: string;
   description: string;
   category: string;

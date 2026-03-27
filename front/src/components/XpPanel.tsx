@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useAuth } from '../hooks/useAuth';
+import { getScopedStorageItem, getScopedStorageKey, getStorageScopeId } from '../utils/userStorage';
 
 type XpPanelProps = {
   initialTotalXp?: number;
@@ -48,20 +50,28 @@ const getRankLabel = (level: number) => {
 };
 
 export const XpPanel = ({ initialTotalXp = 0 }: XpPanelProps) => {
+  const { user, loading: authLoading } = useAuth();
   const [totalXp, setTotalXp] = useState(initialTotalXp);
   const [recentGain, setRecentGain] = useState(0);
 
   const levelInfo = useMemo(() => getLevelInfo(totalXp), [totalXp]);
   const progress = clamp((levelInfo.xpIntoLevel / levelInfo.levelXp) * 100, 0, 100);
+  const storageScope = useMemo(() => getStorageScopeId(user?.uid), [user?.uid]);
+  const xpStorageKey = useMemo(() => getScopedStorageKey(XP_STORAGE_KEY, user?.uid), [user?.uid]);
 
   useEffect(() => {
-    const savedXp = Number(localStorage.getItem(XP_STORAGE_KEY));
+    if (authLoading) return;
+
+    const savedXp = Number(getScopedStorageItem(XP_STORAGE_KEY, user?.uid));
     if (!Number.isNaN(savedXp)) {
       setTotalXp(savedXp);
+    } else {
+      setTotalXp(initialTotalXp);
     }
 
     const handleXpEvent = (event: Event) => {
       if (!(event instanceof CustomEvent)) return;
+      if (event.detail?.scope !== storageScope) return;
       if (typeof event.detail?.totalXp === 'number') {
         setTotalXp(event.detail.totalXp as number);
       }
@@ -72,7 +82,7 @@ export const XpPanel = ({ initialTotalXp = 0 }: XpPanelProps) => {
     };
 
     const handleStorageChange = (storageEvent: StorageEvent) => {
-      if (storageEvent.key !== XP_STORAGE_KEY) return;
+      if (storageEvent.key !== xpStorageKey) return;
       const next = Number(storageEvent.newValue);
       if (!Number.isNaN(next)) setTotalXp(next);
     };
@@ -83,7 +93,7 @@ export const XpPanel = ({ initialTotalXp = 0 }: XpPanelProps) => {
       window.removeEventListener(XP_EVENT, handleXpEvent);
       window.removeEventListener('storage', handleStorageChange);
     };
-  }, []);
+  }, [authLoading, initialTotalXp, storageScope, user?.uid, xpStorageKey]);
 
   return (
     <section className="rounded-2xl border border-cyan-500/30 bg-black/40 p-5 shadow-[0_0_22px_rgba(34,211,238,0.2)]">

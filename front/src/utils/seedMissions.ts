@@ -1,7 +1,6 @@
 import { collection, addDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { getCurrentRotationId } from '../constants/quest';
-import type { Quest } from '../types/quest';
 
 const SEED_MISSIONS = [
   {

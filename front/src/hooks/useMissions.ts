@@ -1,12 +1,119 @@
 import { useEffect, useState, useCallback } from 'react';
-import type { Quest, Reward } from '../types/quest';
+import type { Quest, Reward, Category, Difficulty } from '../types/quest';
+import type { NeedEffects } from '../types/needs';
+import { applyNeedsBoost } from '../utils/needsState';
+import { useAuth } from './useAuth';
+import {
+  getScopedStorageItem,
+  getStorageScopeId,
+  setScopedStorageItem,
+} from '../utils/userStorage';
+import { maintainStorageHealth } from '../utils/storageOptimization';
+import { batchedFetch, progressiveLoad } from '../utils/requestQueue';
 
 const API_URL = 'http://localhost:3001/api';
 const INVENTORY_EVENT = 'inventory:updated';
 const XP_EVENT = 'xp:updated';
+const INVENTORY_STORAGE_KEY = 'playerInventory';
 const XP_STORAGE_KEY = 'playerXpTotal';
 const WALLET_EVENT = 'wallet:updated';
-const WALLET_KEY = 'playerCredits';
+const WALLET_STORAGE_KEY = 'playerCredits';
+const USER_CREATED_MISSION_IDS_KEY = 'userCreatedMissionIds';
+
+const getUserCreatedMissionIds = (userId?: string | null): string[] => {
+  try {
+    const raw = getScopedStorageItem(USER_CREATED_MISSION_IDS_KEY, userId);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map((id) => String(id)) : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveUserCreatedMissionIds = (ids: string[], userId?: string | null) => {
+  setScopedStorageItem(USER_CREATED_MISSION_IDS_KEY, JSON.stringify(ids), userId);
+};
+
+const markPersonalMissions = (missions: Quest[], userId?: string | null): Quest[] => {
+  const personalIds = new Set(getUserCreatedMissionIds(userId));
+
+  return missions.map((mission) => {
+    const id = String(mission.id);
+    if (!personalIds.has(id)) return mission;
+
+    return {
+      ...mission,
+      missionType: 'personal',
+      isUserCreated: true,
+    };
+  });
+};
+
+const CATEGORY_NEEDS_BASE_EFFECTS: Partial<Record<Category, NeedEffects>> = {
+  'Tâches Ménagères': { productivity: 8, mood: 6, energy: 5 },
+  Sport: { energy: 14, mood: 10, engagement: 8, thirst: 6 },
+  'Projets Personnels': { productivity: 12, focus: 10, mood: 7, engagement: 6 },
+  'Art & Créativité': { mood: 10, engagement: 12, focus: 8 },
+  Apprentissage: { focus: 12, productivity: 10, engagement: 6 },
+  'Santé & Bien-être': { hunger: 10, thirst: 14, energy: 9, mood: 9 },
+  Loisirs: { engagement: 14, mood: 10, energy: 5 },
+  Travail: { productivity: 14, focus: 11, engagement: 5 },
+};
+
+const DIFFICULTY_NEEDS_MULTIPLIER: Record<Difficulty, number> = {
+  facile: 1,
+  moyen: 1.2,
+  difficile: 1.4,
+};
+
+const hasNeedEffects = (effects?: NeedEffects): effects is NeedEffects =>
+  Boolean(effects && Object.keys(effects).length > 0);
+
+const scaleNeedsEffects = (baseEffects: NeedEffects, multiplier: number): NeedEffects => {
+  const scaled: NeedEffects = {};
+
+  for (const key of Object.keys(baseEffects) as Array<keyof NeedEffects>) {
+    const value = baseEffects[key];
+    if (typeof value !== 'number') continue;
+    scaled[key] = Math.round(value * multiplier);
+  }
+
+  return scaled;
+};
+
+const inferNeedsEffects = (category: string, difficulty: string): NeedEffects | undefined => {
+  const baseEffects = CATEGORY_NEEDS_BASE_EFFECTS[category as Category];
+  if (!baseEffects) return undefined;
+
+  const multiplier = DIFFICULTY_NEEDS_MULTIPLIER[difficulty as Difficulty] ?? 1;
+  const scaled = scaleNeedsEffects(baseEffects, multiplier);
+  return hasNeedEffects(scaled) ? scaled : undefined;
+};
+
+const getNeedsEffectsForQuest = (quest: Quest): NeedEffects | undefined => {
+  if (hasNeedEffects(quest.needsEffects)) {
+    return quest.needsEffects;
+  }
+  return inferNeedsEffects(quest.category, quest.difficulty);
+};
+
+const markNeedsMissions = (missions: Quest[]): Quest[] => {
+  return missions.map((mission) => {
+    const effects = getNeedsEffectsForQuest(mission);
+    const isNeedsMission = mission.isNeedsMission ?? hasNeedEffects(effects);
+
+    return {
+      ...mission,
+      needsEffects: effects,
+      isNeedsMission,
+    };
+  });
+};
+
+const hydrateMissions = (missions: Quest[], userId?: string | null): Quest[] => {
+  return markNeedsMissions(markPersonalMissions(missions, userId));
+};
 
 // Missions par défaut en cas d'erreur API
 const DEFAULT_MISSIONS: Quest[] = [
@@ -306,33 +413,251 @@ const DEFAULT_MISSIONS: Quest[] = [
       count: 50,
       desc: '+50 points de progression carrière'
     }
+  },
+  {
+    id: '15',
+    title: 'Boire 750 ml d\'Eau',
+    description: 'Remplir une gourde et boire 750 ml pour remonter la jauge de soif.',
+    category: 'Santé & Bien-être',
+    difficulty: 'facile',
+    completed: false,
+    isPinned: false,
+    rotationId: 'default',
+    createdAt: Date.now(),
+    missionType: 'real',
+    isNeedsMission: true,
+    needsEffects: {
+      thirst: 22,
+      energy: 6,
+    },
+    reward: {
+      id: 'r15',
+      name: 'Gourde Isotherme',
+      icon: '🧴',
+      type: 'Objet',
+      rarity: 'common',
+      count: 1,
+      desc: '+Hydratation rapide'
+    }
+  },
+  {
+    id: '16',
+    title: 'Préparer un Repas Équilibré',
+    description: 'Composer une assiette complète (protéines, légumes, féculents) pour remonter la faim.',
+    category: 'Santé & Bien-être',
+    difficulty: 'moyen',
+    completed: false,
+    isPinned: false,
+    rotationId: 'default',
+    createdAt: Date.now(),
+    missionType: 'real',
+    isNeedsMission: true,
+    needsEffects: {
+      hunger: 24,
+      mood: 8,
+      energy: 10,
+    },
+    reward: {
+      id: 'r16',
+      name: 'Lunch Box Nutrition+',
+      icon: '🍱',
+      type: 'Objet',
+      rarity: 'rare',
+      count: 1,
+      desc: '+Satiété et énergie durable'
+    }
+  },
+  {
+    id: '17',
+    title: 'Session Focus 25 min (Pomodoro)',
+    description: 'Lancer un minuteur et travailler sans distraction pendant 25 minutes.',
+    category: 'Travail',
+    difficulty: 'moyen',
+    completed: false,
+    isPinned: false,
+    rotationId: 'default',
+    createdAt: Date.now(),
+    missionType: 'real',
+    isNeedsMission: true,
+    needsEffects: {
+      productivity: 20,
+      focus: 18,
+      mood: 5,
+    },
+    reward: {
+      id: 'r17',
+      name: 'Minuteur Pomodoro',
+      icon: '⏱',
+      type: 'Objet',
+      rarity: 'rare',
+      count: 1,
+      desc: '+Productivité ciblée'
+    }
+  },
+  {
+    id: '18',
+    title: 'Pause Anti-Ennui 20 min',
+    description: 'Faire une activité plaisir hors écran: musique, marche ou mini-jeu créatif.',
+    category: 'Loisirs',
+    difficulty: 'facile',
+    completed: false,
+    isPinned: false,
+    rotationId: 'default',
+    createdAt: Date.now(),
+    missionType: 'real',
+    isNeedsMission: true,
+    needsEffects: {
+      engagement: 24,
+      mood: 14,
+    },
+    reward: {
+      id: 'r18',
+      name: 'Kit Anti-Ennui',
+      icon: '🎲',
+      type: 'Objet',
+      rarity: 'common',
+      count: 1,
+      desc: '+Engagement et fun'
+    }
+  },
+  {
+    id: '19',
+    title: 'Routine Sport Express 15 min',
+    description: 'Faire un mini circuit cardio/renfo pour relancer le corps et l\'énergie.',
+    category: 'Sport',
+    difficulty: 'moyen',
+    completed: false,
+    isPinned: false,
+    rotationId: 'default',
+    createdAt: Date.now(),
+    missionType: 'real',
+    isNeedsMission: true,
+    needsEffects: {
+      energy: 18,
+      mood: 12,
+      engagement: 8,
+    },
+    reward: {
+      id: 'r19',
+      name: 'Bande Élastique Active',
+      icon: '🏋️',
+      type: 'Objet',
+      rarity: 'common',
+      count: 1,
+      desc: '+Énergie instantanée'
+    }
+  },
+  {
+    id: '20',
+    title: 'Rituel Calme Avant Sommeil',
+    description: '20 minutes de routine sans écran: respiration, étirements et préparation du coucher.',
+    category: 'Santé & Bien-être',
+    difficulty: 'difficile',
+    completed: false,
+    isPinned: false,
+    rotationId: 'default',
+    createdAt: Date.now(),
+    missionType: 'real',
+    isNeedsMission: true,
+    needsEffects: {
+      energy: 22,
+      focus: 12,
+      mood: 15,
+    },
+    reward: {
+      id: 'r20',
+      name: 'Masque de Nuit Premium',
+      icon: '😴',
+      type: 'Objet',
+      rarity: 'epic',
+      count: 1,
+      desc: '+Récupération nocturne'
+    }
   }
 ];
 
 export function useMissions() {
-  const [quests, setQuests] = useState<Quest[]>(DEFAULT_MISSIONS);
+  const { user, loading: authLoading } = useAuth();
+  const [quests, setQuests] = useState<Quest[]>(markNeedsMissions(DEFAULT_MISSIONS));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [inventory, setInventory] = useState<Reward[]>([]);
+  const storageScope = getStorageScopeId(user?.uid);
+
+  const readInventory = useCallback(() => {
+    // Vérifier et nettoyer le stockage si nécessaire
+    const health = maintainStorageHealth();
+    if (health.cleaned > 0) {
+      console.log(`[Inventory] Freed ${(health.cleaned / 1024).toFixed(2)}KB during load`);
+    }
+
+    const savedInventory = getScopedStorageItem(INVENTORY_STORAGE_KEY, user?.uid);
+    if (!savedInventory) return [];
+
+    try {
+      return JSON.parse(savedInventory) as Reward[];
+    } catch (err) {
+      console.error('Error parsing inventory:', err);
+      return [];
+    }
+  }, [user?.uid]);
+
+  const saveInventory = useCallback(
+    (newInventory: Reward[]) => {
+      setInventory(newInventory);
+      try {
+        setScopedStorageItem(INVENTORY_STORAGE_KEY, JSON.stringify(newInventory), user?.uid);
+      } catch (err) {
+        // Si la sauvegarde échoue (probablement quota dépassé), essayer de nettoyer et réessayer
+        console.warn('Storage quota exceeded, attempting cleanup...', err);
+        const health = maintainStorageHealth();
+        if (health.cleaned > 0) {
+          try {
+            setScopedStorageItem(INVENTORY_STORAGE_KEY, JSON.stringify(newInventory), user?.uid);
+            console.log('[Inventory] Retry successful after cleanup');
+          } catch (retryErr) {
+            console.error('[Inventory] Save failed even after cleanup:', retryErr);
+          }
+        }
+      }
+      window.dispatchEvent(
+        new CustomEvent(INVENTORY_EVENT, {
+          detail: { inventory: newInventory, scope: storageScope },
+        })
+      );
+    },
+    [storageScope, user?.uid]
+  );
+
+  const getRequestHeaders = useCallback(
+    async (includeJson = false) => {
+      const headers = new Headers();
+
+      if (includeJson) {
+        headers.set('Content-Type', 'application/json');
+      }
+
+      if (user) {
+        try {
+          headers.set('Authorization', `Bearer ${await user.getIdToken()}`);
+        } catch (err) {
+          console.warn('Unable to attach Firebase token to missions request:', err);
+        }
+        headers.set('x-user-id', user.uid);
+      } else {
+        headers.set('x-user-id', storageScope);
+      }
+
+      return headers;
+    },
+    [storageScope, user]
+  );
 
   // Charger l'inventaire depuis localStorage
   useEffect(() => {
-    const savedInventory = localStorage.getItem('playerInventory');
-    if (savedInventory) {
-      try {
-        setInventory(JSON.parse(savedInventory));
-      } catch (err) {
-        console.error('Error parsing inventory:', err);
-      }
-    }
-  }, []);
-
-  // Sauvegarder l'inventaire dans localStorage
-  const saveInventory = (newInventory: Reward[]) => {
-    setInventory(newInventory);
-    localStorage.setItem('playerInventory', JSON.stringify(newInventory));
-    window.dispatchEvent(new CustomEvent(INVENTORY_EVENT, { detail: { inventory: newInventory } }));
-  };
+    if (authLoading) return;
+    setInventory(readInventory());
+  }, [authLoading, readInventory]);
 
   const getXpGain = (difficulty: Quest['difficulty']) => {
     switch (difficulty) {
@@ -362,37 +687,71 @@ export function useMissions() {
 
   // Charger les missions
   const fetchQuests = useCallback(async () => {
+    if (authLoading) return;
+
     setLoading(true);
     setError(null);
     
     try {
-      console.log('Fetching missions from API...');
-      const response = await fetch(`${API_URL}/missions/current`);
+      console.log('Fetching missions and inventory...');
       
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
-      }
+      // Utiliser le progressive loading pour charger les données critiques en parallèle
+      const headers = await getRequestHeaders();
+      const results = await progressiveLoad(
+        [
+          {
+            key: 'missions',
+            fetch: async () => {
+              const response = await fetch(`${API_URL}/missions/current`, { headers });
+              if (!response.ok) throw new Error(`API error: ${response.status}`);
+              return response.json();
+            },
+            priority: 'critical',
+          },
+          {
+            key: 'inventory',
+            fetch: async () => {
+              const response = await fetch(`${API_URL}/inventory`, { headers });
+              if (!response.ok) return { inventory: [] };
+              return response.json();
+            },
+            priority: 'high',
+          },
+        ],
+        (key, data) => {
+          console.log(`Loaded: ${key}`);
+        }
+      );
 
-      const data = await response.json();
-      const missions = data.missions || [];
-      
-      console.log(`Loaded ${missions.length} missions from API`);
-      
+      const missions = results.missions?.missions || [];
+      const inventory = results.inventory?.inventory || [];
+
+      console.log(`Loaded ${missions.length} missions and ${inventory.length} inventory items`);
+
       if (missions.length > 0) {
-        setQuests(missions);
+        setQuests(hydrateMissions(missions, user?.uid));
+        if (inventory.length > 0) {
+          setInventory(inventory);
+        }
       } else {
-        console.log('No missions from API, using defaults and seeding...');
-        setQuests(DEFAULT_MISSIONS);
+        console.log('No missions from API, using defaults...');
+        setQuests(hydrateMissions(DEFAULT_MISSIONS, user?.uid));
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Unknown error';
-      console.error('Error fetching missions:', errorMsg);
-      setError(errorMsg);
-      setQuests(DEFAULT_MISSIONS);
+      const isNetworkError =
+        err instanceof TypeError && err.message.toLowerCase().includes('fetch');
+      if (isNetworkError) {
+        console.warn('Backend unavailable, using default missions.');
+      } else {
+        console.error('Error fetching missions:', errorMsg);
+      }
+      setError(null);
+      setQuests(hydrateMissions(DEFAULT_MISSIONS, user?.uid));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [authLoading, getRequestHeaders, user?.uid]);
 
   // Seed les missions
   const seedMissions = async () => {
@@ -400,7 +759,7 @@ export function useMissions() {
       console.log('Sending seed request to API...');
       const response = await fetch(`${API_URL}/missions/seed`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getRequestHeaders(true),
       });
 
       if (!response.ok) {
@@ -419,8 +778,14 @@ export function useMissions() {
 
   // Charger les missions au montage
   useEffect(() => {
+    if (authLoading) return;
+    // Nettoyer le stockage avant de charger
+    const health = maintainStorageHealth();
+    if (health.cleaned > 0) {
+      console.log(`[Missions] Storage maintenance: Freed ${(health.cleaned / 1024).toFixed(2)}KB`);
+    }
     fetchQuests();
-  }, [fetchQuests]);
+  }, [authLoading, fetchQuests]);
 
   // Compléter une mission
   const completeMission = async (questId: string) => {
@@ -440,7 +805,7 @@ export function useMissions() {
       try {
         const response = await fetch(`${API_URL}/missions/${questId}/complete`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: await getRequestHeaders(true),
         });
 
         if (response.ok) {
@@ -461,7 +826,7 @@ export function useMissions() {
 
       // Compléter la mission localement avec sa récompense
       if (quest.reward) {
-        const newInventory = [...inventory];
+        const newInventory = [...readInventory()];
         const existingItem = newInventory.find((item) => item.id === quest.reward!.id);
 
         if (existingItem) {
@@ -475,19 +840,23 @@ export function useMissions() {
       }
 
       const xpGain = getXpGain(quest.difficulty);
-      const currentXp = Number(localStorage.getItem(XP_STORAGE_KEY)) || 0;
+      const currentXp = Number(getScopedStorageItem(XP_STORAGE_KEY, user?.uid)) || 0;
       const newXpTotal = currentXp + xpGain;
-      localStorage.setItem(XP_STORAGE_KEY, String(newXpTotal));
+      setScopedStorageItem(XP_STORAGE_KEY, String(newXpTotal), user?.uid);
       window.dispatchEvent(
-        new CustomEvent(XP_EVENT, { detail: { totalXp: newXpTotal, gain: xpGain } })
+        new CustomEvent(XP_EVENT, {
+          detail: { totalXp: newXpTotal, gain: xpGain, scope: storageScope },
+        })
       );
 
       const creditGain = getCreditGain(quest.difficulty);
-      const currentCredits = Number(localStorage.getItem(WALLET_KEY)) || 0;
+      const currentCredits = Number(getScopedStorageItem(WALLET_STORAGE_KEY, user?.uid)) || 0;
       const newCredits = currentCredits + creditGain;
-      localStorage.setItem(WALLET_KEY, String(newCredits));
+      setScopedStorageItem(WALLET_STORAGE_KEY, String(newCredits), user?.uid);
       window.dispatchEvent(
-        new CustomEvent(WALLET_EVENT, { detail: { credits: newCredits, gain: creditGain } })
+        new CustomEvent(WALLET_EVENT, {
+          detail: { credits: newCredits, gain: creditGain, scope: storageScope },
+        })
       );
 
       // Marquer la mission comme complétée
@@ -497,7 +866,20 @@ export function useMissions() {
         )
       );
 
-      return { success: true, reward: quest.reward, xpGain, totalXp: newXpTotal, creditGain, credits: newCredits };
+      const missionNeedsBoost = getNeedsEffectsForQuest(quest);
+      if (hasNeedEffects(missionNeedsBoost)) {
+        applyNeedsBoost(missionNeedsBoost, 'mission-complete', user?.uid);
+      }
+
+      return {
+        success: true,
+        reward: quest.reward,
+        xpGain,
+        totalXp: newXpTotal,
+        creditGain,
+        credits: newCredits,
+        needsBoost: missionNeedsBoost,
+      };
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Unknown error';
       console.error('Error completing mission:', errorMsg);
@@ -510,7 +892,7 @@ export function useMissions() {
     try {
       await fetch(`${API_URL}/missions/${questId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getRequestHeaders(true),
         body: JSON.stringify({ isPinned: !isPinned }),
       });
 
@@ -524,23 +906,55 @@ export function useMissions() {
     }
   };
 
-  // Créer une mission
-  const createQuest = async (title: string, category: string, difficulty: string) => {
+  // Créer une mission (local-first, puis sync API optionnel)
+  const createQuest = async (title: string, category: string, difficulty: string, description?: string): Promise<boolean> => {
     try {
-      const response = await fetch(`${API_URL}/missions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, category, difficulty }),
-      });
+      // 1. Créer la mission localement immédiatement
+      const localId = `local-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const now = Date.now();
+      const needsEffects = inferNeedsEffects(category, difficulty);
+      
+      const personalQuest: Quest = {
+        id: localId,
+        title: title.trim(),
+        description: description?.trim() || undefined,
+        category: category as Category,
+        difficulty: difficulty as Difficulty,
+        createdAt: now,
+        rotationId: `user-created-${now}`,
+        isPinned: false,
+        completed: false,
+        missionType: 'personal',
+        isUserCreated: true,
+        isNeedsMission: hasNeedEffects(needsEffects),
+        needsEffects,
+      };
 
-      if (!response.ok) {
-        throw new Error(`Create failed: ${response.status}`);
+      // 2. Sauvegarder l'ID dans localStorage
+      const savedIds = getUserCreatedMissionIds(user?.uid);
+      if (!savedIds.includes(localId)) {
+        saveUserCreatedMissionIds([...savedIds, localId], user?.uid);
       }
 
-      const newQuest = await response.json();
-      setQuests((prev) => [newQuest, ...prev]);
+      // 3. Ajouter à la liste immédiatement
+      setQuests((prev) => [personalQuest, ...prev]);
+
+      // 4. Optionnel: Tenter de synchroniser avec l'API en arrière-plan
+      try {
+        await fetch(`${API_URL}/missions`, {
+          method: 'POST',
+          headers: await getRequestHeaders(true),
+          body: JSON.stringify({ title, category, difficulty, description }),
+        });
+      } catch {
+        // L'API n'est pas disponible mais la mission locale fonctionne
+        console.log('Mission créée localement (API non disponible)');
+      }
+
+      return true; // Succès
     } catch (err) {
-      console.error('Error creating mission:', err);
+      console.error('Erreur création mission:', err);
+      return false; // Échec
     }
   };
 

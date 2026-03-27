@@ -1,5 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Reward } from '../types/quest';
+import { useAuth } from './useAuth';
+import {
+  getScopedStorageItem,
+  getScopedStorageKey,
+  getStorageScopeId,
+  setScopedStorageItem,
+} from '../utils/userStorage';
 
 const STARTER_ITEMS: Reward[] = [
   {
@@ -112,14 +119,22 @@ const STARTER_ITEMS: Reward[] = [
   }
 ];
 
+const INVENTORY_STORAGE_KEY = 'playerInventory';
+const INVENTORY_EVENT = 'inventory:updated';
+
 export function useInventory() {
+  const { user, loading: authLoading } = useAuth();
   const [inventory, setInventory] = useState<Reward[]>([]);
   const [loading, setLoading] = useState(true);
-  const inventoryKey = 'playerInventory';
-  const inventoryEvent = 'inventory:updated';
 
-  const readInventory = () => {
-    const savedInventory = localStorage.getItem(inventoryKey);
+  const storageScope = useMemo(() => getStorageScopeId(user?.uid), [user?.uid]);
+  const inventoryKey = useMemo(
+    () => getScopedStorageKey(INVENTORY_STORAGE_KEY, user?.uid),
+    [user?.uid]
+  );
+
+  const readInventory = useCallback(() => {
+    const savedInventory = getScopedStorageItem(INVENTORY_STORAGE_KEY, user?.uid);
     if (savedInventory) {
       try {
         return JSON.parse(savedInventory) as Reward[];
@@ -128,47 +143,69 @@ export function useInventory() {
       }
     }
 
-    localStorage.setItem(inventoryKey, JSON.stringify(STARTER_ITEMS));
+    setScopedStorageItem(INVENTORY_STORAGE_KEY, JSON.stringify(STARTER_ITEMS), user?.uid);
     return STARTER_ITEMS;
-  };
+  }, [user?.uid]);
 
-  const writeInventory = (next: Reward[]) => {
-    localStorage.setItem(inventoryKey, JSON.stringify(next));
-    setInventory(next);
-    window.dispatchEvent(new CustomEvent(inventoryEvent, { detail: { inventory: next } }));
-  };
+  const writeInventory = useCallback(
+    (next: Reward[]) => {
+      setScopedStorageItem(INVENTORY_STORAGE_KEY, JSON.stringify(next), user?.uid);
+      setInventory(next);
+      window.dispatchEvent(
+        new CustomEvent(INVENTORY_EVENT, { detail: { inventory: next, scope: storageScope } })
+      );
+    },
+    [storageScope, user?.uid]
+  );
 
-  const syncFromStorage = () => {
+  const syncFromStorage = useCallback(() => {
+    if (authLoading) return;
     setInventory(readInventory());
-  };
-
-  useEffect(() => {
-    // Charger l'inventaire depuis localStorage
-    syncFromStorage();
     setLoading(false);
-  }, []);
+  }, [authLoading, readInventory]);
 
-  // Écouter les changements du localStorage
   useEffect(() => {
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === inventoryKey) syncFromStorage();
+    if (authLoading) {
+      setLoading(true);
+      return;
+    }
+    syncFromStorage();
+  }, [authLoading, syncFromStorage]);
+
+  useEffect(() => {
+    if (authLoading) return;
+
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key === inventoryKey) {
+        syncFromStorage();
+      }
     };
 
     const handleInventoryEvent = (event: Event) => {
-      if (event instanceof CustomEvent && event.detail?.inventory) {
+      if (!(event instanceof CustomEvent)) {
+        syncFromStorage();
+        return;
+      }
+
+      if (event.detail?.scope !== storageScope) {
+        return;
+      }
+
+      if (event.detail?.inventory) {
         setInventory(event.detail.inventory as Reward[]);
         return;
       }
+
       syncFromStorage();
     };
 
     window.addEventListener('storage', handleStorageChange);
-    window.addEventListener(inventoryEvent, handleInventoryEvent);
+    window.addEventListener(INVENTORY_EVENT, handleInventoryEvent);
     return () => {
       window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener(inventoryEvent, handleInventoryEvent);
+      window.removeEventListener(INVENTORY_EVENT, handleInventoryEvent);
     };
-  }, []);
+  }, [authLoading, inventoryKey, storageScope, syncFromStorage]);
 
   const addItem = (item: Reward, amount = 1) => {
     if (amount <= 0) return;

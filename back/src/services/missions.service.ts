@@ -8,7 +8,7 @@ export class MissionsService {
   private collection = db.collection('quests');
 
   // Missions par défaut en français avec récompenses
-  private defaultMissions: Omit<Mission, 'id' | 'createdAt'>[] = [
+  private defaultMissions: Omit<Mission, 'id' | 'createdAt' | 'userId'>[] = [
     {
       title: 'Calibrer les Senseurs Neuraux',
       description: 'Synchronisez les senseurs neuraux avec le système de traitement central pour améliorer la précision des lectures.',
@@ -119,9 +119,9 @@ export class MissionsService {
     }
   ];
 
-  async findAll(): Promise<Quest[]> {
+  async findAll(userId: string): Promise<Quest[]> {
     try {
-      const snapshot = await this.collection.get();
+      const snapshot = await this.collection.where('userId', '==', userId).get();
       return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Quest));
     } catch (error) {
       console.error('Error fetching all quests:', error);
@@ -129,38 +129,41 @@ export class MissionsService {
     }
   }
 
-  async findByRotation(rotationId: string): Promise<Quest[]> {
+  async findByRotation(rotationId: string, userId: string): Promise<Quest[]> {
     try {
-      const snapshot = await this.collection
-        .where('rotationId', '==', rotationId)
-        .get();
+      const snapshot = await this.collection.where('userId', '==', userId).get();
+      const missions = snapshot.docs
+        .map((doc) => ({ id: doc.id, ...doc.data() } as Quest))
+        .filter((mission) => mission.rotationId === rotationId);
       
       // Si vide, créer les missions par défaut
-      if (snapshot.empty) {
+      if (missions.length === 0) {
         console.log(`No missions found for rotation ${rotationId}, creating default missions...`);
-        await this.seedMissions(rotationId);
-        const newSnapshot = await this.collection
-          .where('rotationId', '==', rotationId)
-          .get();
-        return newSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Quest));
+        await this.seedMissions(rotationId, userId);
+        const newSnapshot = await this.collection.where('userId', '==', userId).get();
+        return newSnapshot.docs
+          .map((doc) => ({ id: doc.id, ...doc.data() } as Quest))
+          .filter((mission) => mission.rotationId === rotationId);
       }
       
-      return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Quest));
+      return missions;
     } catch (error) {
       console.error(`Error fetching missions for rotation ${rotationId}:`, error);
       throw error;
     }
   }
 
-  async findOne(id: string): Promise<Quest | null> {
+  async findOne(id: string, userId: string): Promise<Quest | null> {
     const doc = await this.collection.doc(id).get();
     if (!doc.exists) return null;
+    if ((doc.data()?.userId as string | undefined) !== userId) return null;
     return { id: doc.id, ...doc.data() } as Quest;
   }
 
-  async create(dto: CreateQuestDto, rotationId: string): Promise<Quest> {
+  async create(dto: CreateQuestDto, rotationId: string, userId: string): Promise<Quest> {
     const quest: Omit<Quest, 'id'> = {
       ...dto,
+      userId,
       description: dto.description || '',
       createdAt: Date.now(),
       rotationId,
@@ -179,28 +182,30 @@ export class MissionsService {
     return { id: docRef.id, ...quest };
   }
 
-  async update(id: string, dto: UpdateQuestDto): Promise<Quest | null> {
+  async update(id: string, dto: UpdateQuestDto, userId: string): Promise<Quest | null> {
     const docRef = this.collection.doc(id);
     const doc = await docRef.get();
     if (!doc.exists) return null;
+    if ((doc.data()?.userId as string | undefined) !== userId) return null;
     
     await docRef.update(dto as Record<string, unknown>);
     const updated = await docRef.get();
     return { id: updated.id, ...updated.data() } as Quest;
   }
 
-  async delete(id: string): Promise<boolean> {
+  async delete(id: string, userId: string): Promise<boolean> {
     const docRef = this.collection.doc(id);
     const doc = await docRef.get();
     if (!doc.exists) return false;
+    if ((doc.data()?.userId as string | undefined) !== userId) return false;
     
     await docRef.delete();
     return true;
   }
 
-  async completeMission(missionId: string): Promise<CompleteMissionResponse> {
+  async completeMission(missionId: string, userId: string): Promise<CompleteMissionResponse> {
     try {
-      const mission = await this.findOne(missionId);
+      const mission = await this.findOne(missionId, userId);
       
       if (!mission) {
         return {
@@ -217,7 +222,7 @@ export class MissionsService {
       }
 
       // Marquer la mission comme complétée
-      const updated = await this.update(missionId, { completed: true });
+      const updated = await this.update(missionId, { completed: true }, userId);
 
       return {
         success: true,
@@ -233,12 +238,13 @@ export class MissionsService {
     }
   }
 
-  async getAchievements(): Promise<AchievementStatus[]> {
-    const snapshot = await this.collection.where('completed', '==', true).get();
+  async getAchievements(userId: string): Promise<AchievementStatus[]> {
+    const snapshot = await this.collection.where('userId', '==', userId).get();
     const counts: Record<string, number> = {};
 
     snapshot.docs.forEach((doc) => {
       const data = doc.data() as Quest;
+      if (!data.completed) return;
       if (!data.category) return;
       counts[data.category] = (counts[data.category] || 0) + 1;
     });
@@ -249,21 +255,25 @@ export class MissionsService {
     );
   }
 
-  private async populateMissionsIfEmpty(): Promise<void> {
+  private async populateMissionsIfEmpty(userId: string): Promise<void> {
     const rotationId = this.getCurrentRotationId();
-    const snapshot = await this.collection.where('rotationId', '==', rotationId).get();
+    const snapshot = await this.collection.where('userId', '==', userId).get();
+    const missions = snapshot.docs
+      .map((doc) => doc.data() as Quest)
+      .filter((mission) => mission.rotationId === rotationId);
     
-    if (snapshot.empty) {
-      await this.seedMissions(rotationId);
+    if (missions.length === 0) {
+      await this.seedMissions(rotationId, userId);
     }
   }
 
-  private async seedMissions(rotationId: string): Promise<void> {
+  private async seedMissions(rotationId: string, userId: string): Promise<void> {
     console.log(`Seeding missions for rotation: ${rotationId}`);
     try {
       for (const mission of this.defaultMissions) {
         const questData: Omit<Mission, 'id'> = {
           ...mission,
+          userId,
           rotationId,
           createdAt: Date.now()
         };
@@ -276,22 +286,25 @@ export class MissionsService {
     }
   }
 
-  async seedAllMissions(): Promise<{ success: boolean; count: number; message: string }> {
+  async seedAllMissions(userId: string): Promise<{ success: boolean; count: number; message: string }> {
     const rotationId = this.getCurrentRotationId();
     
     try {
       // Vérifier si déjà peuplé
-      const existing = await this.collection.where('rotationId', '==', rotationId).get();
+      const existing = await this.collection.where('userId', '==', userId).get();
+      const rotationMissions = existing.docs
+        .map((doc) => doc.data() as Quest)
+        .filter((mission) => mission.rotationId === rotationId);
       
-      if (!existing.empty) {
+      if (rotationMissions.length > 0) {
         return {
           success: true,
-          count: existing.size,
-          message: `Missions already exist for rotation ${rotationId}. Total: ${existing.size}`
+          count: rotationMissions.length,
+          message: `Missions already exist for rotation ${rotationId}. Total: ${rotationMissions.length}`
         };
       }
 
-      await this.seedMissions(rotationId);
+      await this.seedMissions(rotationId, userId);
       
       return {
         success: true,

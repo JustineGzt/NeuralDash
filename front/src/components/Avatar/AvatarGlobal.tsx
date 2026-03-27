@@ -29,13 +29,7 @@ export const AvatarGlobal: React.FC<Props> = ({ stats }) => {
           <div className="absolute inset-0 pointer-events-none bg-linear-to-b from-transparent via-cyan-400/10 to-transparent h-full w-full animate-scan" />
         </div>
       </div>
-
-      {/* Libellé de l'émotion */}
-      <div className="mt-4 text-center">
-        <span className="text-[10px] font-black tracking-[0.4em] text-cyan-300 uppercase bg-cyan-950/30 px-4 py-1 rounded-full border border-cyan-500/20">
-          {emotion}
-        </span>
-      </div>
+      
     </div>
   );
 };

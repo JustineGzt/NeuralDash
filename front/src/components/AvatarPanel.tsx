@@ -24,7 +24,7 @@ export const AvatarPanel = ({ name, role }: AvatarPanelProps) => (
         {role}
       </div>
     </div>
-    <div className="text-[10px] uppercase tracking-[0.4em] text-cyan-200/70">Callsign</div>
+    <div className="text-[10px] uppercase tracking-[0.4em] text-cyan-100/95">Callsign</div>
     <div className="text-sm font-semibold text-white">{name}</div>
   </div>
 );

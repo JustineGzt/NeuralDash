@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { TopHeader } from '../components/TopHeader';
 import { InventoryPanel } from '../components/InventoryPanel';
+import { useAuth } from '../hooks/useAuth';
+import { getScopedStorageItem, setScopedStorageItem } from '../utils/userStorage';
 
 interface Item {
   id: string;
@@ -24,13 +26,17 @@ interface Module {
 
 const INVENTORY_KEY = 'playerInventory';
 const MODULES_KEY = 'equippedModules';
+const XP_STORAGE_KEY = 'playerXpTotal';
 
 export const Inventaire = () => {
+  const { user, loading: authLoading } = useAuth();
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
   const [modules, setModules] = useState<Module[]>([]);
 
   useEffect(() => {
-    const storedModules = localStorage.getItem(MODULES_KEY);
+    if (authLoading) return;
+
+    const storedModules = getScopedStorageItem(MODULES_KEY, user?.uid);
     if (storedModules) {
       try {
         setModules(JSON.parse(storedModules));
@@ -45,8 +51,8 @@ export const Inventaire = () => {
       { id: 'm2', name: 'Sub-Dermal Plating', icon: '🛡️', stat: 'Shield +20%', color: 'border-emerald-400', equipped: true }
     ];
     setModules(defaults);
-    localStorage.setItem(MODULES_KEY, JSON.stringify(defaults));
-  }, []);
+    setScopedStorageItem(MODULES_KEY, JSON.stringify(defaults), user?.uid);
+  }, [authLoading, user?.uid]);
 
   const equipableTypes = useMemo(() => new Set(['module', 'armure', 'chapeau']), []);
   const isEquipable = selectedItem?.type
@@ -61,7 +67,7 @@ export const Inventaire = () => {
     setModules((prev) => {
       const target = prev.find((mod) => mod.id === moduleId);
       const next = prev.filter((mod) => mod.id !== moduleId);
-      localStorage.setItem(MODULES_KEY, JSON.stringify(next));
+      setScopedStorageItem(MODULES_KEY, JSON.stringify(next), user?.uid);
 
       if (target) {
         addToInventory({
@@ -119,7 +125,7 @@ export const Inventaire = () => {
   };
 
   const applyInventoryChange = (itemId: string, delta: number) => {
-    const stored = localStorage.getItem(INVENTORY_KEY);
+    const stored = getScopedStorageItem(INVENTORY_KEY, user?.uid);
     if (!stored) return null;
     let inventory: Item[] = [];
 
@@ -142,13 +148,17 @@ export const Inventaire = () => {
       inventory[index] = { ...target, count: nextCount };
     }
 
-    localStorage.setItem(INVENTORY_KEY, JSON.stringify(inventory));
-    window.dispatchEvent(new CustomEvent('inventory:updated', { detail: { inventory } }));
+    setScopedStorageItem(INVENTORY_KEY, JSON.stringify(inventory), user?.uid);
+    window.dispatchEvent(
+      new CustomEvent('inventory:updated', {
+        detail: { inventory, scope: user?.uid ?? 'guest' },
+      })
+    );
     return inventory;
   };
 
   const addToInventory = (item: Item) => {
-    const stored = localStorage.getItem(INVENTORY_KEY);
+    const stored = getScopedStorageItem(INVENTORY_KEY, user?.uid);
     const inventory: Item[] = stored ? (JSON.parse(stored) as Item[]) : [];
     const index = inventory.findIndex((existing) => existing.id === item.id);
 
@@ -159,8 +169,12 @@ export const Inventaire = () => {
       inventory.push({ ...item, count: item.count ?? 1 });
     }
 
-    localStorage.setItem(INVENTORY_KEY, JSON.stringify(inventory));
-    window.dispatchEvent(new CustomEvent('inventory:updated', { detail: { inventory } }));
+    setScopedStorageItem(INVENTORY_KEY, JSON.stringify(inventory), user?.uid);
+    window.dispatchEvent(
+      new CustomEvent('inventory:updated', {
+        detail: { inventory, scope: user?.uid ?? 'guest' },
+      })
+    );
   };
 
   const createModuleFromItem = (item: Item): Module => {
@@ -183,10 +197,14 @@ export const Inventaire = () => {
 
   const applyXpGain = (amount: number) => {
     if (!amount || amount <= 0) return;
-    const storedXp = Number(localStorage.getItem('playerXpTotal')) || 0;
+    const storedXp = Number(getScopedStorageItem(XP_STORAGE_KEY, user?.uid)) || 0;
     const nextXp = storedXp + amount;
-    localStorage.setItem('playerXpTotal', String(nextXp));
-    window.dispatchEvent(new CustomEvent('xp:updated', { detail: { totalXp: nextXp, gain: amount } }));
+    setScopedStorageItem(XP_STORAGE_KEY, String(nextXp), user?.uid);
+    window.dispatchEvent(
+      new CustomEvent('xp:updated', {
+        detail: { totalXp: nextXp, gain: amount, scope: user?.uid ?? 'guest' },
+      })
+    );
   };
 
   return (

@@ -1,3 +1,5 @@
+import type { NeedEffects } from './needs';
+
 export type Category = 
   // Missions neuronales (fictives)
   | 'Système' | 'Réseau' | 'Maintenance' | 'Communication' | 'Sécurité' | 'Stockage'
@@ -6,7 +8,7 @@ export type Category =
 
 export type Difficulty = 'facile' | 'moyen' | 'difficile';
 export type Rarity = 'common' | 'rare' | 'epic';
-export type MissionType = 'neural' | 'real'; // Neural = fictive, Real = vraie
+export type MissionType = 'neural' | 'real' | 'personal'; // Personal = creee par utilisateur
 
 export interface Reward {
   id: string;
@@ -20,6 +22,7 @@ export interface Reward {
 
 export interface Quest {
   id: string;
+  userId?: string;
   title: string;
   description?: string;
   category: Category;
@@ -31,6 +34,9 @@ export interface Quest {
   reward?: Reward;
   iconUrl?: string;
   missionType?: MissionType;
+  isUserCreated?: boolean;
+  isNeedsMission?: boolean;
+  needsEffects?: NeedEffects;
 }
 
 export interface QuestFilters {

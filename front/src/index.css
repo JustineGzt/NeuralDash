@@ -1,18 +1,230 @@
-@import url('https://fonts.googleapis.com/css2?family=Oxanium:wght@300;400;500;600;700;800&family=Share+Tech+Mono&display=swap');
+﻿@import url('https://fonts.googleapis.com/css2?family=Oxanium:wght@300;400;500;600;700;800&family=Share+Tech+Mono&display=swap');
 @import "tailwindcss";
 
 :root {
-	color-scheme: dark;
+color-scheme: dark;
+--theme-body-bg: #03070b;
+--theme-overlay-a: transparent;
+--theme-overlay-b: transparent;
 }
 
 *,
 *::before,
 *::after {
-	box-sizing: border-box;
+box-sizing: border-box;
 }
 
 body {
-	margin: 0;
-	font-family: 'Oxanium', 'Share Tech Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-	background-color: #03070b;
+margin: 0;
+font-family: 'Oxanium', 'Share Tech Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+background-color: #03070b;
+}
+/* ─── Visual Theme System ────────────────────────────────────────────────
+   THREE layers applied per theme:
+
+   LAYER 1  CSS variable remapping
+     Tailwind v4 generates utilities as `color: var(--color-*)` references.
+     Overriding those variables on html[data-ui-theme] automatically
+     recolours ALL standard utilities: text-*, bg-*, border-*, ring-*,
+     from-*/via-*/to-* that use named Tailwind colours.
+
+   LAYER 2  Hardcoded glow-shadow overrides
+     Some components embed raw RGBA/hex literals in arbitrary classes:
+       shadow-[0_0_10px_rgba(34,211,238,0.8)]
+     These skip the variable system.  CSS attr-substring selectors
+     [class*="..."] catch them and swap box-shadow to the theme colour.
+     Targeted cyan literals:
+       "211,238"  =  rgba(34,211,238,x)  cyan-400 RGB components
+       "22d3ee"   =  #22d3ee             cyan-400 hex
+       "182,212"  =  rgba(6,182,212,x)   cyan-500 RGB components
+
+   LAYER 3  Body background + ambient overlay
+     body/.min-h-screen background-color + body::before fixed radial glow
+     at z-index 9998 (above #root, pointer-events:none so clicks pass).
+────────────────────────────────────────────────────────────────────────── */
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   BLOOD RED  –  green/blue palette  →  red/rose family
+ ══════════════════════════════════════════════════════════════════════════ */
+
+/* LAYER 3 — background */
+html[data-ui-theme='blood-red'] body          { background-color: #160204; }
+html[data-ui-theme='blood-red'] .min-h-screen { background-color: #160204; }
+html[data-ui-theme='blood-red'] body::before {
+content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 9998;
+background:
+radial-gradient(ellipse 160% 65% at 50%  -10%, rgba(215, 15,  15, 0.45) 0%, transparent 58%),
+radial-gradient(ellipse  90% 55% at 0%   110%, rgba(165,  0,   0, 0.28) 0%, transparent 55%),
+radial-gradient(ellipse  90% 55% at 100% 110%, rgba(120,  0,   0, 0.22) 0%, transparent 55%);
+}
+
+/* LAYER 2 — override hardcoded cyan RGB/hex glow shadows  →  crimson */
+html[data-ui-theme='blood-red'] [class*="211,238"],
+html[data-ui-theme='blood-red'] [class*="22d3ee"],
+html[data-ui-theme='blood-red'] [class*="182,212"] {
+box-shadow: 0 0 14px rgba(220, 38, 38, 0.75) !important;
+}
+
+/* LAYER 1 — Tailwind colour-variable remapping */
+html[data-ui-theme='blood-red'] {
+/* sky → red */
+--color-sky-50: var(--color-red-50);   --color-sky-100: var(--color-red-100);
+--color-sky-200: var(--color-red-200); --color-sky-300: var(--color-red-300);
+--color-sky-400: var(--color-red-400); --color-sky-500: var(--color-red-500);
+--color-sky-600: var(--color-red-600); --color-sky-700: var(--color-red-700);
+--color-sky-800: var(--color-red-800); --color-sky-900: var(--color-red-900);
+--color-sky-950: var(--color-red-950);
+/* cyan → red */
+--color-cyan-50: var(--color-red-50);   --color-cyan-100: var(--color-red-100);
+--color-cyan-200: var(--color-red-200); --color-cyan-300: var(--color-red-300);
+--color-cyan-400: var(--color-red-400); --color-cyan-500: var(--color-red-500);
+--color-cyan-600: var(--color-red-600); --color-cyan-700: var(--color-red-700);
+--color-cyan-800: var(--color-red-800); --color-cyan-900: var(--color-red-900);
+--color-cyan-950: var(--color-red-950);
+/* emerald → rose */
+--color-emerald-50: var(--color-rose-50);   --color-emerald-100: var(--color-rose-100);
+--color-emerald-200: var(--color-rose-200); --color-emerald-300: var(--color-rose-300);
+--color-emerald-400: var(--color-rose-400); --color-emerald-500: var(--color-rose-500);
+--color-emerald-600: var(--color-rose-600); --color-emerald-700: var(--color-rose-700);
+--color-emerald-800: var(--color-rose-800); --color-emerald-900: var(--color-rose-900);
+--color-emerald-950: var(--color-rose-950);
+/* teal → rose */
+--color-teal-50: var(--color-rose-50);   --color-teal-100: var(--color-rose-100);
+--color-teal-200: var(--color-rose-200); --color-teal-300: var(--color-rose-300);
+--color-teal-400: var(--color-rose-400); --color-teal-500: var(--color-rose-500);
+--color-teal-600: var(--color-rose-600); --color-teal-700: var(--color-rose-700);
+--color-teal-800: var(--color-rose-800); --color-teal-900: var(--color-rose-900);
+--color-teal-950: var(--color-rose-950);
+/* lime → red */
+--color-lime-50: var(--color-red-50);   --color-lime-100: var(--color-red-100);
+--color-lime-200: var(--color-red-200); --color-lime-300: var(--color-red-300);
+--color-lime-400: var(--color-red-400); --color-lime-500: var(--color-red-500);
+--color-lime-600: var(--color-red-600); --color-lime-700: var(--color-red-700);
+--color-lime-800: var(--color-red-800); --color-lime-900: var(--color-red-900);
+--color-lime-950: var(--color-red-950);
+/* green → red */
+--color-green-50: var(--color-red-50);   --color-green-100: var(--color-red-100);
+--color-green-200: var(--color-red-200); --color-green-300: var(--color-red-300);
+--color-green-400: var(--color-red-400); --color-green-500: var(--color-red-500);
+--color-green-600: var(--color-red-600); --color-green-700: var(--color-red-700);
+--color-green-800: var(--color-red-800); --color-green-900: var(--color-red-900);
+--color-green-950: var(--color-red-950);
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ROYAL GOLD  –  green/blue palette  →  amber/yellow family
+ ══════════════════════════════════════════════════════════════════════════ */
+
+/* LAYER 3 — background */
+html[data-ui-theme='royal-gold'] body          { background-color: #130f03; }
+html[data-ui-theme='royal-gold'] .min-h-screen { background-color: #130f03; }
+html[data-ui-theme='royal-gold'] body::before {
+content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 9998;
+background:
+radial-gradient(ellipse 150% 60% at 50%  -10%, rgba(240, 180, 0, 0.40) 0%, transparent 58%),
+radial-gradient(ellipse  80% 50% at 0%   110%, rgba(200, 140, 0, 0.25) 0%, transparent 55%),
+radial-gradient(ellipse  80% 50% at 100% 110%, rgba(180, 120, 0, 0.20) 0%, transparent 55%);
+}
+
+/* LAYER 2 — override hardcoded cyan glow shadows  →  golden amber */
+html[data-ui-theme='royal-gold'] [class*="211,238"],
+html[data-ui-theme='royal-gold'] [class*="22d3ee"],
+html[data-ui-theme='royal-gold'] [class*="182,212"] {
+box-shadow: 0 0 14px rgba(251, 191, 36, 0.75) !important;
+}
+
+/* LAYER 1 — Tailwind colour-variable remapping */
+html[data-ui-theme='royal-gold'] {
+/* sky → yellow */
+--color-sky-50: var(--color-yellow-50);   --color-sky-100: var(--color-yellow-100);
+--color-sky-200: var(--color-yellow-200); --color-sky-300: var(--color-yellow-300);
+--color-sky-400: var(--color-yellow-400); --color-sky-500: var(--color-yellow-500);
+--color-sky-600: var(--color-yellow-600); --color-sky-700: var(--color-yellow-700);
+--color-sky-800: var(--color-yellow-800); --color-sky-900: var(--color-yellow-900);
+--color-sky-950: var(--color-yellow-950);
+/* cyan → yellow */
+--color-cyan-50: var(--color-yellow-50);   --color-cyan-100: var(--color-yellow-100);
+--color-cyan-200: var(--color-yellow-200); --color-cyan-300: var(--color-yellow-300);
+--color-cyan-400: var(--color-yellow-400); --color-cyan-500: var(--color-yellow-500);
+--color-cyan-600: var(--color-yellow-600); --color-cyan-700: var(--color-yellow-700);
+--color-cyan-800: var(--color-yellow-800); --color-cyan-900: var(--color-yellow-900);
+--color-cyan-950: var(--color-yellow-950);
+/* emerald → amber */
+--color-emerald-50: var(--color-amber-50);   --color-emerald-100: var(--color-amber-100);
+--color-emerald-200: var(--color-amber-200); --color-emerald-300: var(--color-amber-300);
+--color-emerald-400: var(--color-amber-400); --color-emerald-500: var(--color-amber-500);
+--color-emerald-600: var(--color-amber-600); --color-emerald-700: var(--color-amber-700);
+--color-emerald-800: var(--color-amber-800); --color-emerald-900: var(--color-amber-900);
+--color-emerald-950: var(--color-amber-950);
+/* teal → amber */
+--color-teal-50: var(--color-amber-50);   --color-teal-100: var(--color-amber-100);
+--color-teal-200: var(--color-amber-200); --color-teal-300: var(--color-amber-300);
+--color-teal-400: var(--color-amber-400); --color-teal-500: var(--color-amber-500);
+--color-teal-600: var(--color-amber-600); --color-teal-700: var(--color-amber-700);
+--color-teal-800: var(--color-amber-800); --color-teal-900: var(--color-amber-900);
+--color-teal-950: var(--color-amber-950);
+/* lime → amber */
+--color-lime-50: var(--color-amber-50);   --color-lime-100: var(--color-amber-100);
+--color-lime-200: var(--color-amber-200); --color-lime-300: var(--color-amber-300);
+--color-lime-400: var(--color-amber-400); --color-lime-500: var(--color-amber-500);
+--color-lime-600: var(--color-amber-600); --color-lime-700: var(--color-amber-700);
+--color-lime-800: var(--color-amber-800); --color-lime-900: var(--color-amber-900);
+--color-lime-950: var(--color-amber-950);
+/* green → amber */
+--color-green-50: var(--color-amber-50);   --color-green-100: var(--color-amber-100);
+--color-green-200: var(--color-amber-200); --color-green-300: var(--color-amber-300);
+--color-green-400: var(--color-amber-400); --color-green-500: var(--color-amber-500);
+--color-green-600: var(--color-amber-600); --color-green-700: var(--color-amber-700);
+--color-green-800: var(--color-amber-800); --color-green-900: var(--color-amber-900);
+--color-green-950: var(--color-amber-950);
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   NEON GREEN  –  cyan  → lime (electric),  teal/emerald  → green
+ ══════════════════════════════════════════════════════════════════════════ */
+
+/* LAYER 3 — background */
+html[data-ui-theme='neon-green'] body          { background-color: #020e04; }
+html[data-ui-theme='neon-green'] .min-h-screen { background-color: #020e04; }
+html[data-ui-theme='neon-green'] body::before {
+content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 9998;
+background:
+radial-gradient(ellipse 150% 60% at 50%  -10%, rgba(40, 220, 90, 0.40) 0%, transparent 58%),
+radial-gradient(ellipse  80% 50% at 0%   110%, rgba(20, 190, 60, 0.25) 0%, transparent 55%),
+radial-gradient(ellipse  80% 50% at 100% 110%, rgba(10, 160, 50, 0.20) 0%, transparent 55%);
+}
+
+/* LAYER 2 — override hardcoded cyan glow shadows  →  lime/neon */
+html[data-ui-theme='neon-green'] [class*="211,238"],
+html[data-ui-theme='neon-green'] [class*="22d3ee"],
+html[data-ui-theme='neon-green'] [class*="182,212"] {
+box-shadow: 0 0 14px rgba(163, 230, 53, 0.75) !important;
+}
+
+/* LAYER 1 — Tailwind colour-variable remapping */
+html[data-ui-theme='neon-green'] {
+/* cyan → lime (brighter, more electric) */
+--color-cyan-50: var(--color-lime-50);   --color-cyan-100: var(--color-lime-100);
+--color-cyan-200: var(--color-lime-200); --color-cyan-300: var(--color-lime-300);
+--color-cyan-400: var(--color-lime-400); --color-cyan-500: var(--color-lime-500);
+--color-cyan-600: var(--color-lime-600); --color-cyan-700: var(--color-lime-700);
+--color-cyan-800: var(--color-lime-800); --color-cyan-900: var(--color-lime-900);
+--color-cyan-950: var(--color-lime-950);
+/* emerald → lime (sharper neon green) */
+--color-emerald-50: var(--color-lime-50);   --color-emerald-100: var(--color-lime-100);
+--color-emerald-200: var(--color-lime-200); --color-emerald-300: var(--color-lime-300);
+--color-emerald-400: var(--color-lime-400); --color-emerald-500: var(--color-lime-500);
+--color-emerald-600: var(--color-lime-600); --color-emerald-700: var(--color-lime-700);
+--color-emerald-800: var(--color-lime-800); --color-emerald-900: var(--color-lime-900);
+--color-emerald-950: var(--color-lime-950);
+/* teal → green */
+--color-teal-50: var(--color-green-50);   --color-teal-100: var(--color-green-100);
+--color-teal-200: var(--color-green-200); --color-teal-300: var(--color-green-300);
+--color-teal-400: var(--color-green-400); --color-teal-500: var(--color-green-500);
+--color-teal-600: var(--color-green-600); --color-teal-700: var(--color-green-700);
+--color-teal-800: var(--color-green-800); --color-teal-900: var(--color-green-900);
+--color-teal-950: var(--color-green-950);
 }

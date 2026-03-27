@@ -3,7 +3,7 @@ import { MissionRow } from '../components/MissionRow';
 import { CreateQuestForm } from '../components/CreateQuestForm';
 import { useMissions } from '../hooks/useMissions';
 
-type FilterType = 'all' | 'real' | 'neural';
+type FilterType = 'all' | 'real' | 'neural' | 'personal' | 'needs';
 
 export const Missions = () => {
   const { quests, loading, error, completeMission, togglePin, createQuest, seedMissions } = useMissions();
@@ -11,6 +11,29 @@ export const Missions = () => {
   const [filter, setFilter] = useState<FilterType>('all');
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const hasNeedsBoost = (quest: (typeof quests)[number]) =>
+    Boolean(quest.isNeedsMission || (quest.needsEffects && Object.keys(quest.needsEffects).length > 0));
+
+  const formatNeedsBoost = (quest: (typeof quests)[number]) => {
+    if (!quest.needsEffects) return '';
+
+    const labels: Record<string, string> = {
+      hunger: 'Faim',
+      thirst: 'Soif',
+      engagement: 'Anti-ennui',
+      productivity: 'Productivité',
+      energy: 'Énergie',
+      focus: 'Focus',
+      mood: 'Moral',
+    };
+
+    return Object.entries(quest.needsEffects)
+      .filter(([, value]) => typeof value === 'number' && value > 0)
+      .slice(0, 3)
+      .map(([key, value]) => `+${value} ${labels[key] ?? key}`)
+      .join(' · ');
+  };
 
   const handleSeedMissions = async () => {
     setSeeding(true);
@@ -26,9 +49,16 @@ export const Missions = () => {
   const handleCompleteMission = async (questId: string) => {
     setErrorMessage(null);
     try {
+      const quest = quests.find((q) => q.id === questId);
       const result = await completeMission(questId);
-      if (result.reward) {
-        setSuccessMessage(`🎉 Mission complétée! +${result.reward.name}`);
+      if (result.reward || quest) {
+        const rewardPart = result.reward ? `+${result.reward.name}` : 'progression enregistrée';
+        const needsPart = quest ? formatNeedsBoost(quest) : '';
+        setSuccessMessage(
+          needsPart
+            ? `🎉 Mission complétée! ${rewardPart} | Besoins: ${needsPart}`
+            : `🎉 Mission complétée! ${rewardPart}`
+        );
         setTimeout(() => setSuccessMessage(null), 3000);
       }
     } catch (err) {
@@ -40,16 +70,21 @@ export const Missions = () => {
 
   // Filtrer les missions
   const filteredQuests = quests.filter((quest) => {
+    if (filter === 'needs') return hasNeedsBoost(quest);
+    if (filter === 'personal') return quest.missionType === 'personal' || quest.isUserCreated === true;
     if (filter === 'real') return quest.missionType === 'real';
     if (filter === 'neural') return quest.missionType === 'neural';
     return true;
   });
 
   // Calculer les stats
-  const totalQuests = quests.length;
+  const availableQuests = quests.filter((q) => !q.completed).length;
   const completedQuests = quests.filter((q) => q.completed).length;
-  const realQuests = quests.filter((q) => q.missionType === 'real').length;
-  const neuralQuests = quests.filter((q) => q.missionType === 'neural').length;
+  const completedRealQuests = quests.filter((q) => q.completed && q.missionType === 'real').length;
+  const completedNeuralQuests = quests.filter((q) => q.completed && q.missionType === 'neural').length;
+  const completedPersonalQuests = quests.filter((q) => q.completed && (q.missionType === 'personal' || q.isUserCreated)).length;
+  const personalQuests = quests.filter((q) => q.missionType === 'personal' || q.isUserCreated).length;
+  const needsQuests = quests.filter((q) => hasNeedsBoost(q)).length;
 
   return (
     <div className="min-h-screen bg-[#120015] text-fuchsia-100 flex items-center justify-center px-4 py-10">
@@ -86,22 +121,26 @@ export const Missions = () => {
           )}
 
           {/* Stats */}
-          <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="mt-6 grid grid-cols-2 md:grid-cols-5 gap-3">
             <div className="rounded-lg border border-fuchsia-300/30 bg-fuchsia-500/10 p-3 text-center">
-              <p className="text-[9px] text-fuchsia-200/60 uppercase tracking-widest">Total</p>
-              <p className="text-2xl font-black text-fuchsia-300 mt-1">{totalQuests}</p>
+              <p className="text-[9px] text-fuchsia-200/60 uppercase tracking-widest">Disponibles</p>
+              <p className="text-2xl font-black text-fuchsia-300 mt-1">{availableQuests}</p>
             </div>
             <div className="rounded-lg border border-fuchsia-300/30 bg-fuchsia-500/10 p-3 text-center">
               <p className="text-[9px] text-fuchsia-200/60 uppercase tracking-widest">Complétées</p>
               <p className="text-2xl font-black text-green-400 mt-1">{completedQuests}</p>
             </div>
-            <div className="rounded-lg border border-fuchsia-300/30 bg-fuchsia-500/10 p-3 text-center">
-              <p className="text-[9px] text-fuchsia-200/60 uppercase tracking-widest">Réelles</p>
-              <p className="text-2xl font-black text-green-300 mt-1">{realQuests}</p>
+            <div className="rounded-lg border border-green-400/30 bg-green-500/10 p-3 text-center">
+              <p className="text-[9px] text-green-200/60 uppercase tracking-widest">Réelles ✓</p>
+              <p className="text-2xl font-black text-green-300 mt-1">{completedRealQuests}</p>
             </div>
-            <div className="rounded-lg border border-fuchsia-300/30 bg-fuchsia-500/10 p-3 text-center">
-              <p className="text-[9px] text-fuchsia-200/60 uppercase tracking-widest">Neuronales</p>
-              <p className="text-2xl font-black text-cyan-300 mt-1">{neuralQuests}</p>
+            <div className="rounded-lg border border-cyan-400/30 bg-cyan-500/10 p-3 text-center">
+              <p className="text-[9px] text-cyan-200/60 uppercase tracking-widest">Neuronales ✓</p>
+              <p className="text-2xl font-black text-cyan-300 mt-1">{completedNeuralQuests}</p>
+            </div>
+            <div className="rounded-lg border border-violet-400/30 bg-violet-500/10 p-3 text-center">
+              <p className="text-[9px] text-violet-200/60 uppercase tracking-widest">Personnel ✓</p>
+              <p className="text-2xl font-black text-violet-300 mt-1">{completedPersonalQuests}</p>
             </div>
           </div>
 
@@ -167,6 +206,26 @@ export const Missions = () => {
               >
                 ⚡ Neuronales
               </button>
+              <button
+                onClick={() => setFilter('personal')}
+                className={`text-[9px] px-3 py-1 rounded border transition-all uppercase tracking-widest ${
+                  filter === 'personal'
+                    ? 'border-violet-300 bg-violet-500/30 text-violet-100'
+                    : 'border-violet-300/50 text-violet-100/60 hover:bg-violet-500/20'
+                }`}
+              >
+                👤 Personnel ({personalQuests})
+              </button>
+              <button
+                onClick={() => setFilter('needs')}
+                className={`text-[9px] px-3 py-1 rounded border transition-all uppercase tracking-widest ${
+                  filter === 'needs'
+                    ? 'border-amber-300 bg-amber-500/30 text-amber-100'
+                    : 'border-amber-300/50 text-amber-100/70 hover:bg-amber-500/20'
+                }`}
+              >
+                🧪 Besoins ({needsQuests})
+              </button>
             </div>
 
             {loading ? (
@@ -176,7 +235,15 @@ export const Missions = () => {
             ) : filteredQuests.length === 0 ? (
               <div className="text-center py-8 space-y-4 mt-5">
                 <p className="text-sm text-fuchsia-200/50">
-                  {filter === 'all' ? 'Aucune mission disponible' : `Aucune mission ${filter === 'real' ? 'réelle' : 'neuronale'}`}
+                  {filter === 'all'
+                    ? 'Aucune mission disponible'
+                    : filter === 'real'
+                      ? 'Aucune mission réelle'
+                      : filter === 'neural'
+                        ? 'Aucune mission neuronale'
+                        : filter === 'personal'
+                          ? 'Aucune mission personnelle'
+                          : 'Aucune mission besoins'}
                 </p>
                 {filter !== 'all' && (
                   <button

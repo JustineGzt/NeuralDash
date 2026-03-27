@@ -1,0 +1,74 @@
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: progression-backend
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      ALLOWED_ORIGINS: https://progression.example.com
+      LOG_LEVEL: info
+    expose:
+      - "3001"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    cpus: 0.50
+    mem_limit: 256m
+    mem_reservation: 128m
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - progression_net
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: progression-nginx
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:size=64m,noexec,nosuid
+      - /var/run:size=8m,noexec,nosuid
+      - /tmp:size=16m,noexec,nosuid
+    volumes:
+      - ./nginx/progression.docker.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/logs:/var/log/nginx
+      - ./nginx/certs:/etc/letsencrypt:ro
+      - ./nginx/acme:/var/www/certbot:ro
+    cpus: 0.50
+    mem_limit: 128m
+    mem_reservation: 64m
+    pids_limit: 64
+    security_opt:
+      - no-new-privileges:true
+    ulimits:
+      nofile:
+        soft: 4096
+        hard: 8192
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - progression_net
+
+networks:
+  progression_net:
+    driver: bridge

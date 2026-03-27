@@ -58,6 +58,28 @@ export const MissionRow = ({ quest, onTogglePin, onComplete }: MissionRowProps) 
     }
   };
 
+  const formatNeedEffects = (effects?: Quest['needsEffects']) => {
+    if (!effects) return '';
+
+    const labels: Record<string, string> = {
+      hunger: 'Faim',
+      thirst: 'Soif',
+      engagement: 'Anti-ennui',
+      productivity: 'Prod',
+      energy: 'Energie',
+      focus: 'Focus',
+      mood: 'Moral',
+    };
+
+    return Object.entries(effects)
+      .filter(([, value]) => typeof value === 'number' && value > 0)
+      .slice(0, 2)
+      .map(([key, value]) => `+${value} ${labels[key] ?? key}`)
+      .join(' / ');
+  };
+
+  const needsBoostText = formatNeedEffects(quest.needsEffects);
+
   return (
     <>
       <div className={`flex items-center justify-between rounded-xl border transition-all ${
@@ -86,6 +108,11 @@ export const MissionRow = ({ quest, onTogglePin, onComplete }: MissionRowProps) 
               <p className={`text-[10px] uppercase tracking-[0.35em] ${getDifficultyColor(quest.difficulty)}`}>
                 [{quest.category} - {quest.difficulty}]
               </p>
+              {(quest.missionType === 'personal' || quest.isUserCreated) && (
+                <span className="text-[7px] px-1.5 py-0.5 rounded border border-violet-400/40 bg-violet-500/10 text-violet-300 font-bold uppercase tracking-widest">
+                  Personnel
+                </span>
+              )}
               {quest.missionType === 'real' && (
                 <span className="text-[7px] px-1.5 py-0.5 rounded border border-green-500/40 bg-green-500/10 text-green-300 font-bold uppercase tracking-widest">
                   Réelle
@@ -94,6 +121,16 @@ export const MissionRow = ({ quest, onTogglePin, onComplete }: MissionRowProps) 
               {quest.missionType === 'neural' && (
                 <span className="text-[7px] px-1.5 py-0.5 rounded border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 font-bold uppercase tracking-widest">
                   Neurale
+                </span>
+              )}
+              {(quest.isNeedsMission || needsBoostText) && (
+                <span className="text-[7px] px-1.5 py-0.5 rounded border border-amber-400/50 bg-amber-500/10 text-amber-200 font-bold uppercase tracking-widest">
+                  Besoins
+                </span>
+              )}
+              {needsBoostText && (
+                <span className="text-[8px] px-2 py-0.5 rounded border border-amber-300/40 bg-amber-500/10 text-amber-100/90 font-bold uppercase tracking-wider">
+                  {needsBoostText}
                 </span>
               )}
               {quest.reward && (
