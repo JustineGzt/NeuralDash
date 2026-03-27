@@ -4,11 +4,11 @@ import { PageNav } from './components/PageNav';
 import { CookieConsent } from './components/CookieConsent';
 import { LegalFooter } from './components/LegalFooter';
 import { useVisualTheme } from './hooks/useVisualTheme';
-import { lazyPages } from './utils/pageLazyLoader';
+import { lazyPages, lazyImportMap } from './utils/pageLazyLoader';
 import { withSuspense } from './utils/withSuspenseFn';
 import { prefetchPage, PREFETCH_STRATEGY } from './utils/lazyLoadConfig.constant';
+import { SpeedInsights } from "@vercel/speed-insights/react";
 
-// Wraps les pages lazy-loaded avec Suspense
 const Home = withSuspense(lazyPages.Home);
 const Missions = withSuspense(lazyPages.Missions);
 const Inventaire = withSuspense(lazyPages.Inventaire);
@@ -31,23 +31,23 @@ export default function App() {
   useEffect(() => {
     // Charger immédiatement les pages critiques
     PREFETCH_STRATEGY.immediate.forEach(page => {
-      const module = lazyPages[page as keyof typeof lazyPages];
-      if (module) prefetchPage(module);
+      const importFn = lazyImportMap[page];
+      if (importFn) prefetchPage(importFn);
     });
 
     // Charger avec un petit délai
     const soon = setTimeout(() => {
       PREFETCH_STRATEGY.soon.forEach(page => {
-        const module = lazyPages[page as keyof typeof lazyPages];
-        if (module) prefetchPage(module);
+        const importFn = lazyImportMap[page];
+        if (importFn) prefetchPage(importFn);
       });
     }, 1000);
 
     // Charger les pages moins critiques après 5s
     const eventually = setTimeout(() => {
       PREFETCH_STRATEGY.eventually.forEach(page => {
-        const module = lazyPages[page as keyof typeof lazyPages];
-        if (module) prefetchPage(module);
+        const importFn = lazyImportMap[page];
+        if (importFn) prefetchPage(importFn);
       });
     }, 5000);
 
@@ -77,6 +77,7 @@ export default function App() {
         </div>
         <LegalFooter />
         <CookieConsent />
+        <SpeedInsights />
       </div>
     </BrowserRouter>
   );

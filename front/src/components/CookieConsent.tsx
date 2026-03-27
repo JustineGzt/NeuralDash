@@ -45,14 +45,14 @@ export const CookieConsent = ({ onAccept }: CookieConsentProps) => {
   return (
     <>
       {/* Overlay */}
-      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100]" />
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-100" />
 
       {/* Banner */}
-      <div className="fixed bottom-0 left-0 right-0 z-[101] p-4 md:p-6">
+      <div className="fixed bottom-0 left-0 right-0 z-101 p-4 md:p-6">
         <div className="max-w-5xl mx-auto bg-[#050b12] border-2 border-cyan-500/40 rounded-2xl shadow-[0_0_60px_rgba(0,0,0,0.9)] overflow-hidden">
           
           {/* Header */}
-          <div className="bg-gradient-to-r from-cyan-500/20 to-blue-500/20 border-b border-cyan-500/30 px-6 py-4">
+          <div className="bg-linear-to-r from-cyan-500/20 to-blue-500/20 border-b border-cyan-500/30 px-6 py-4">
             <div className="flex items-center gap-3">
               <span className="text-3xl">🍪</span>
               <h2 className="text-2xl font-bold text-cyan-400">Cookies et Confidentialité</h2>
@@ -91,7 +91,7 @@ export const CookieConsent = ({ onAccept }: CookieConsentProps) => {
                 <div className="flex flex-col sm:flex-row gap-3">
                   <button
                     onClick={handleAcceptAll}
-                    className="flex-1 px-6 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-semibold rounded-lg hover:from-cyan-400 hover:to-blue-400 transition-all shadow-lg"
+                    className="flex-1 px-6 py-3 bg-linear-to-r from-cyan-500 to-blue-500 text-white font-semibold rounded-lg hover:from-cyan-400 hover:to-blue-400 transition-all shadow-lg"
                   >
                     Tout accepter
                   </button>
@@ -144,7 +144,7 @@ export const CookieConsent = ({ onAccept }: CookieConsentProps) => {
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer">
                         <input type="checkbox" defaultChecked className="sr-only peer" />
-                        <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-500"></div>
+                        <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-500"></div>
                       </label>
                     </div>
                     <p className="text-sm text-cyan-200/80">
@@ -161,7 +161,7 @@ export const CookieConsent = ({ onAccept }: CookieConsentProps) => {
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer">
                         <input type="checkbox" defaultChecked className="sr-only peer" />
-                        <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-500"></div>
+                        <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-500"></div>
                       </label>
                     </div>
                     <p className="text-sm text-cyan-200/80">
@@ -180,7 +180,7 @@ export const CookieConsent = ({ onAccept }: CookieConsentProps) => {
                 <div className="flex flex-col sm:flex-row gap-3">
                   <button
                     onClick={handleAcceptAll}
-                    className="flex-1 px-6 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-semibold rounded-lg hover:from-cyan-400 hover:to-blue-400 transition-all shadow-lg"
+                    className="flex-1 px-6 py-3 bg-linear-to-r from-cyan-500 to-blue-500 text-white font-semibold rounded-lg hover:from-cyan-400 hover:to-blue-400 transition-all shadow-lg"
                   >
                     Confirmer mes choix
                   </button>

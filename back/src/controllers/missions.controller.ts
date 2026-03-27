@@ -1,8 +1,8 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
-import { MissionsService } from './missions.service';
-import type { CreateQuestDto, UpdateQuestDto } from './missions.interface';
-import { auth } from '../../config/firebase';
+import { MissionsService } from '../services/missions.service';
+import type { CreateQuestDto, UpdateQuestDto } from '../modules/missions/missions.interface';
+import { auth } from '../config/firebase';
 
 @Controller('missions')
 export class MissionsController {

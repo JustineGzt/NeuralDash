@@ -9,7 +9,10 @@ import type { StatsInput } from '../utils/emotionLogic';
 import { TopHeader } from '../components/TopHeader';
 import { XpPanel } from '../components/XpPanel';
 import { useAuth } from '../hooks/useAuth';
+import { usePremiumWallet } from '../hooks/usePremiumWallet';
+import { useWallet } from '../hooks/useWallet';
 import { useNeeds } from '../hooks/useNeeds';
+import { getScopedStorageItem, setScopedStorageItem } from '../utils/userStorage';
 
 type GoalCategory = 'big' | 'basic' | 'health';
 
@@ -31,6 +34,22 @@ type RewardHistoryEntry = {
   date: string;
 };
 
+type DailyRewardType = 'credits' | 'crystals';
+
+type DailyRewardConfig = {
+  day: number;
+  type: DailyRewardType;
+  amount: number;
+  label: string;
+};
+
+type DailyRewardState = {
+  streak: number;
+  totalClaims: number;
+  lastClaimDate: string | null;
+  lastClaimDay: number | null;
+};
+
 const STORAGE_KEYS = {
   bigGoals: 'home_big_goals_v1',
   basicGoals: 'home_basic_goals_v1',
@@ -38,6 +57,24 @@ const STORAGE_KEYS = {
   wishlist: 'home_wishlist_v1',
   history: 'home_reward_history_v1',
   usedSpins: 'home_used_spins_v1',
+  dailyRewards: 'home_daily_rewards_v1',
+};
+
+const DAILY_REWARDS: DailyRewardConfig[] = [
+  { day: 1, type: 'crystals', amount: 400, label: 'Prime de connexion' },
+  { day: 2, type: 'credits', amount: 180, label: 'Ravitaillement' },
+  { day: 3, type: 'crystals', amount: 90, label: 'Cristaux de soutien' },
+  { day: 4, type: 'credits', amount: 260, label: 'Bonus de progression' },
+  { day: 5, type: 'crystals', amount: 140, label: 'Reserve premium' },
+  { day: 6, type: 'credits', amount: 320, label: 'Mission completee' },
+  { day: 7, type: 'crystals', amount: 220, label: 'Coffre hebdomadaire' },
+];
+
+const DEFAULT_DAILY_REWARD_STATE: DailyRewardState = {
+  streak: 0,
+  totalClaims: 0,
+  lastClaimDate: null,
+  lastClaimDay: null,
 };
 
 const readStorage = <T,>(key: string, fallback: T): T => {
@@ -60,7 +97,45 @@ const writeStorage = <T,>(key: string, value: T) => {
   }
 };
 
+const readScopedStorage = <T,>(key: string, fallback: T, userId?: string | null): T => {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const raw = getScopedStorageItem(key, userId);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+};
+
+const writeScopedStorage = <T,>(key: string, value: T, userId?: string | null) => {
+  if (typeof window === 'undefined') return;
+  try {
+    setScopedStorageItem(key, JSON.stringify(value), userId);
+  } catch {
+    // Ignore storage write errors.
+  }
+};
+
 const makeId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const getTodayKey = () => new Date().toISOString().slice(0, 10);
+
+const getDayDiff = (previousDate: string, currentDate: string) => {
+  const previous = new Date(`${previousDate}T00:00:00Z`).getTime();
+  const current = new Date(`${currentDate}T00:00:00Z`).getTime();
+  return Math.floor((current - previous) / 86400000);
+};
+
+const getNextDailyRewardDay = (state: DailyRewardState, today: string) => {
+  if (!state.lastClaimDate) return 1;
+  const diff = getDayDiff(state.lastClaimDate, today);
+  if (diff <= 0) return state.lastClaimDay ?? 1;
+  if (diff === 1) return (state.streak % DAILY_REWARDS.length) + 1;
+  return 1;
+};
+
+const getRewardTypeLabel = (type: DailyRewardType) => (type === 'crystals' ? 'cristaux' : 'credits');
 
 const drawMoneyGain = () => {
   const r = Math.random();
@@ -84,8 +159,13 @@ const getProgress = (goals: Goal[]) => {
 export const Home = () => {
   const { user, signOut } = useAuth();
   const { needs } = useNeeds();
+  const { credits, addCredits } = useWallet();
+  const { crystals, addCrystals } = usePremiumWallet();
   const navigate = useNavigate();
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [isDailyCalendarOpen, setIsDailyCalendarOpen] = useState(false);
+  const [dailyRewardState, setDailyRewardState] = useState<DailyRewardState>(DEFAULT_DAILY_REWARD_STATE);
+  const [dailyRewardMessage, setDailyRewardMessage] = useState<string | null>(null);
   const [goalsOpen, setGoalsOpen] = useState(true);
   const [bigGoals, setBigGoals] = useState<Goal[]>(() => readStorage(STORAGE_KEYS.bigGoals, []));
   const [basicGoals, setBasicGoals] = useState<Goal[]>(() => readStorage(STORAGE_KEYS.basicGoals, []));
@@ -130,6 +210,10 @@ export const Home = () => {
     writeStorage(STORAGE_KEYS.usedSpins, usedSpins);
   }, [usedSpins]);
 
+  useEffect(() => {
+    setDailyRewardState(readScopedStorage(STORAGE_KEYS.dailyRewards, DEFAULT_DAILY_REWARD_STATE, user?.uid));
+  }, [user?.uid]);
+
   const handleSignOut = async () => {
     try {
       setIsSigningOut(true);
@@ -162,6 +246,46 @@ export const Home = () => {
   );
   const remainingSpins = Math.max(totalAvailableSpins - usedSpins, 0);
   const totalGain = history.reduce((sum, entry) => sum + entry.gain, 0);
+  const todayKey = getTodayKey();
+  const hasClaimedToday = dailyRewardState.lastClaimDate === todayKey;
+  const nextDailyRewardDay = getNextDailyRewardDay(dailyRewardState, todayKey);
+  const nextDailyReward = DAILY_REWARDS[nextDailyRewardDay - 1];
+
+  const claimDailyReward = () => {
+    const currentState = readScopedStorage(STORAGE_KEYS.dailyRewards, DEFAULT_DAILY_REWARD_STATE, user?.uid);
+    const currentTodayKey = getTodayKey();
+
+    if (currentState.lastClaimDate === currentTodayKey) {
+      setDailyRewardState(currentState);
+      return false;
+    }
+
+    const nextDay = getNextDailyRewardDay(currentState, currentTodayKey);
+    const reward = DAILY_REWARDS[nextDay - 1];
+    const diff = currentState.lastClaimDate ? getDayDiff(currentState.lastClaimDate, currentTodayKey) : 0;
+    const nextStreak = !currentState.lastClaimDate || diff > 1 ? 1 : currentState.streak + 1;
+    const updatedState: DailyRewardState = {
+      streak: nextStreak,
+      totalClaims: currentState.totalClaims + 1,
+      lastClaimDate: currentTodayKey,
+      lastClaimDay: reward.day,
+    };
+
+    if (reward.type === 'crystals') {
+      addCrystals(reward.amount);
+    } else {
+      addCredits(reward.amount);
+    }
+
+    writeScopedStorage(STORAGE_KEYS.dailyRewards, updatedState, user?.uid);
+    setDailyRewardState(updatedState);
+    setDailyRewardMessage(`Connexion du jour validee: +${reward.amount} ${getRewardTypeLabel(reward.type)}.`);
+    return true;
+  };
+
+  useEffect(() => {
+    claimDailyReward();
+  }, [user?.uid]);
 
   const addGoal = (category: GoalCategory) => {
     const value = goalDrafts[category].trim();
@@ -256,20 +380,104 @@ export const Home = () => {
 
         <div className="relative z-10 border border-cyan-500/30 rounded-3xl bg-[#050b12]/80 backdrop-blur-xl p-4 sm:p-6 lg:p-10 shadow-[0_0_40px_rgba(0,0,0,0.8)]">
           {user ? (
-            <div className="mb-4 sm:mb-5 flex justify-end">
-              <button
-                type="button"
-                onClick={handleSignOut}
-                disabled={isSigningOut}
-                className="inline-flex items-center gap-2 rounded-xl border border-cyan-300/40 bg-cyan-400/10 px-2.5 py-1.5 sm:px-3 sm:py-2 text-[9px] sm:text-[10px] uppercase tracking-[0.2em] sm:tracking-[0.25em] text-cyan-100 transition-all hover:border-cyan-300/80 hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <span className="h-1.5 w-1.5 rounded-full bg-cyan-300 shadow-[0_0_8px_rgba(34,211,238,0.8)]" />
-                {isSigningOut ? 'Deconnexion...' : 'Deconnexion'}
-              </button>
+            <div className="mb-4 sm:mb-5 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap gap-3">
+                <div className="rounded-2xl border border-cyan-300/25 bg-black/35 px-4 py-3">
+                  <p className="text-[9px] uppercase tracking-[0.28em] text-cyan-100/75">Credits</p>
+                  <p className="text-lg font-semibold text-emerald-300">{credits} cr</p>
+                </div>
+                <div className="rounded-2xl border border-fuchsia-300/25 bg-black/35 px-4 py-3">
+                  <p className="text-[9px] uppercase tracking-[0.28em] text-fuchsia-100/75">Cristaux</p>
+                  <p className="text-lg font-semibold text-fuchsia-200">💠 {crystals}</p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsDailyCalendarOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-xl border border-amber-300/40 bg-amber-400/10 px-3 py-2 text-[9px] sm:text-[10px] uppercase tracking-[0.2em] sm:tracking-[0.25em] text-amber-100 transition-all hover:border-amber-300/80 hover:bg-amber-400/20"
+                >
+                  <span className="text-sm">📅</span>
+                  Calendrier
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  disabled={isSigningOut}
+                  className="inline-flex items-center gap-2 rounded-xl border border-cyan-300/40 bg-cyan-400/10 px-2.5 py-1.5 sm:px-3 sm:py-2 text-[9px] sm:text-[10px] uppercase tracking-[0.2em] sm:tracking-[0.25em] text-cyan-100 transition-all hover:border-cyan-300/80 hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-cyan-300 shadow-[0_0_8px_rgba(34,211,238,0.8)]" />
+                  {isSigningOut ? 'Deconnexion...' : 'Deconnexion'}
+                </button>
+              </div>
             </div>
           ) : null}
 
           <TopHeader />
+
+          <div className="mt-4 grid gap-4 lg:grid-cols-[1.2fr,0.8fr]">
+            <section className="rounded-2xl border border-amber-300/30 bg-[linear-gradient(135deg,rgba(120,53,15,0.22),rgba(8,47,73,0.22))] p-4 sm:p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-[10px] uppercase tracking-[0.38em] text-amber-100/75">Calendrier quotidien</p>
+                  <p className="mt-2 text-sm text-amber-50">
+                    {hasClaimedToday
+                      ? `Recompense du jour recuperee: +${DAILY_REWARDS[(dailyRewardState.lastClaimDay ?? 1) - 1].amount} ${getRewardTypeLabel(DAILY_REWARDS[(dailyRewardState.lastClaimDay ?? 1) - 1].type)}`
+                      : `Prochaine connexion: +${nextDailyReward.amount} ${getRewardTypeLabel(nextDailyReward.type)}`}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-amber-300/30 bg-black/30 px-4 py-3 text-right">
+                  <p className="text-[9px] uppercase tracking-[0.28em] text-amber-100/70">Serie</p>
+                  <p className="mt-1 text-2xl font-black text-amber-200">{dailyRewardState.streak} j</p>
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
+                {DAILY_REWARDS.map((reward) => {
+                  const isClaimed = Boolean(dailyRewardState.lastClaimDay && reward.day <= dailyRewardState.lastClaimDay && hasClaimedToday);
+                  const isTodayReward = reward.day === (hasClaimedToday ? dailyRewardState.lastClaimDay : nextDailyRewardDay);
+
+                  return (
+                    <div
+                      key={reward.day}
+                      className={`rounded-xl border px-3 py-3 text-xs transition ${
+                        isTodayReward
+                          ? 'border-amber-300/80 bg-amber-400/18 text-amber-50 shadow-[0_0_20px_rgba(251,191,36,0.18)]'
+                          : isClaimed
+                            ? 'border-emerald-300/45 bg-emerald-500/12 text-emerald-100'
+                            : 'border-cyan-400/20 bg-black/30 text-cyan-100/78'
+                      }`}
+                    >
+                      <p className="text-[9px] uppercase tracking-[0.25em]">Jour {reward.day}</p>
+                      <p className="mt-2 text-base font-bold">{reward.type === 'crystals' ? '💠' : '◈'} {reward.amount}</p>
+                      <p className="mt-1 text-[10px] opacity-80">{reward.label}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-cyan-400/25 bg-black/30 p-4 sm:p-5">
+              <p className="text-[10px] uppercase tracking-[0.35em] text-cyan-100/70">Etat journalier</p>
+              <p className="mt-3 text-sm text-cyan-100/85">
+                {hasClaimedToday ? 'La recompense du jour a deja ete creditee automatiquement.' : 'Connecte-toi chaque jour pour enchainer les recompenses.'}
+              </p>
+              <button
+                type="button"
+                onClick={() => setIsDailyCalendarOpen(true)}
+                className="mt-4 inline-flex items-center gap-2 rounded-xl border border-cyan-300/35 bg-cyan-500/10 px-4 py-2 text-[10px] uppercase tracking-[0.24em] text-cyan-100 transition hover:border-cyan-300/70 hover:bg-cyan-500/20"
+              >
+                Ouvrir le calendrier
+              </button>
+              {dailyRewardMessage ? (
+                <p className="mt-4 rounded-xl border border-emerald-300/30 bg-emerald-500/10 px-3 py-3 text-xs text-emerald-100">
+                  {dailyRewardMessage}
+                </p>
+              ) : null}
+            </section>
+          </div>
+
           <div className="mt-4 sm:mt-5">
             <SignalBars values={[45, 70, 55, 80, 65, 90, 75, 50]} />
           </div>
@@ -562,6 +770,72 @@ export const Home = () => {
           </div>
         </div>
       </div>
+
+      {isDailyCalendarOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-3 backdrop-blur-sm">
+          <div className="w-full max-w-3xl rounded-3xl border border-amber-300/35 bg-[#071019] p-5 shadow-[0_0_45px_rgba(0,0,0,0.8)]">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.42em] text-amber-100/75">Calendrier de connexion</p>
+                <h2 className="mt-2 text-2xl font-black uppercase text-amber-50">Recompenses quotidiennes</h2>
+                <p className="mt-2 text-sm text-cyan-100/75">Premier jour: 400 cristaux. Ensuite, une recompense est creditee une fois par jour.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDailyCalendarOpen(false)}
+                className="rounded-xl border border-cyan-300/30 bg-cyan-500/10 px-3 py-2 text-xs uppercase tracking-[0.24em] text-cyan-100 transition hover:bg-cyan-500/20"
+              >
+                Fermer
+              </button>
+            </div>
+
+            <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {DAILY_REWARDS.map((reward) => {
+                const isCurrent = reward.day === (hasClaimedToday ? dailyRewardState.lastClaimDay : nextDailyRewardDay);
+                const isCompleted = Boolean(hasClaimedToday && dailyRewardState.lastClaimDay && reward.day <= dailyRewardState.lastClaimDay);
+
+                return (
+                  <div
+                    key={reward.day}
+                    className={`rounded-2xl border p-4 ${
+                      isCurrent
+                        ? 'border-amber-300/75 bg-amber-400/15'
+                        : isCompleted
+                          ? 'border-emerald-300/40 bg-emerald-500/10'
+                          : 'border-cyan-400/20 bg-black/30'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] uppercase tracking-[0.25em] text-cyan-100/70">Jour {reward.day}</span>
+                      <span className="text-lg">{reward.type === 'crystals' ? '💠' : '◈'}</span>
+                    </div>
+                    <p className="mt-3 text-xl font-bold text-cyan-50">+{reward.amount} {getRewardTypeLabel(reward.type)}</p>
+                    <p className="mt-1 text-xs text-cyan-100/65">{reward.label}</p>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-cyan-400/20 bg-black/30 px-4 py-4">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.3em] text-cyan-100/65">Statut</p>
+                <p className="mt-1 text-sm text-cyan-100/85">
+                  {hasClaimedToday
+                    ? 'Recompense du jour deja recue. Reviens demain pour la suivante.'
+                    : `Prochaine recompense: jour ${nextDailyRewardDay}, +${nextDailyReward.amount} ${getRewardTypeLabel(nextDailyReward.type)}.`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDailyCalendarOpen(false)}
+                className="rounded-xl border border-amber-300/35 bg-amber-400/10 px-4 py-3 text-xs uppercase tracking-[0.22em] text-amber-50 transition hover:bg-amber-400/20"
+              >
+                Compris
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };

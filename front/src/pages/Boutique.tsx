@@ -275,6 +275,16 @@ const SHOP_ITEMS: ShopItem[] = [
     desc: 'Transmission +20%',
     price: 210,
   },
+  {
+    id: 'shop-drink-ultimate-01',
+    name: 'Elixir Omniboost',
+    icon: '🥤',
+    type: 'Consommable',
+    rarity: 'epic',
+    count: 1,
+    desc: 'Boost tous besoins +22',
+    price: 980,
+  },
 ];
 
 const getRarityColor = (rarity: Reward['rarity']) => {

@@ -3,7 +3,6 @@
  * Gère le nettoyage et la compression des données IndexedDB/localStorage
  */
 
-const MAX_STORAGE_SIZE = 5 * 1024 * 1024; // 5MB
 const CLEANUP_THRESHOLD = 4 * 1024 * 1024; // 4MB
 
 /**
@@ -160,14 +159,10 @@ export class CacheManager {
  * Lazy loader pour les données volumineuses
  */
 export class LazyLoader<T> {
-  private data: T[] = [];
-  private pageSize: number;
   private currentPage: number = 0;
   private pages: T[][] = [];
 
   constructor(data: T[], pageSize: number = 20) {
-    this.data = data;
-    this.pageSize = pageSize;
     this.pages = paginateData(data, pageSize);
   }
 

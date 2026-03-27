@@ -20,7 +20,7 @@ export const PREFETCH_STRATEGY = {
 /**
  * Preload une page en arrière-plan (utile pour les prédictions)
  */
-export const prefetchPage = (pageModule: () => Promise<Record<string, unknown>>): void => {
+export const prefetchPage = (pageModule: () => Promise<unknown>): void => {
   // Utiliser requestIdleCallback si disponible, sinon setTimeout
   if ('requestIdleCallback' in window) {
     const win = window as unknown as Window & { requestIdleCallback: (cb: () => void) => void };
@@ -40,10 +40,5 @@ export const prefetchPage = (pageModule: () => Promise<Record<string, unknown>>)
 export const preloadCriticalResources = (): void => {
   if (typeof document === 'undefined') return;
 
-  // Preload les fonts
-  const link = document.createElement('link');
-  link.rel = 'preload';
-  link.as = 'style';
-  link.href = 'https://fonts.googleapis.com/css2?family=Oxanium:wght@300;400;500;600;700;800&family=Share+Tech+Mono&display=swap';
-  document.head.appendChild(link);
+  // Font already loaded via @import in index.css
 };

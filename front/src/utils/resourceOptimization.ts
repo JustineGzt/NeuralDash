@@ -233,6 +233,5 @@ export const initializeResourceOptimizations = () => {
   configureLazyImages();
   optimizeWebVitals();
 
-  // Preload critique
-  preloadResource('https://fonts.googleapis.com/css2?family=Oxanium:wght@300;400;500;600;700;800', 'style');
+
 };

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { db } from '../../config/firebase';
-import type { Quest, CreateQuestDto, UpdateQuestDto, Reward, CompleteMissionResponse, Mission, AchievementStatus } from './missions.interface';
-import { ACHIEVEMENT_THRESHOLDS, CATEGORY_TITLES, KNOWN_CATEGORIES, NOVICE_LABEL, toRomanNumeral } from './achievements.config';
+import { db } from '../config/firebase';
+import type { Quest, CreateQuestDto, UpdateQuestDto, Reward, CompleteMissionResponse, Mission, AchievementStatus } from '../modules/missions/missions.interface';
+import { ACHIEVEMENT_THRESHOLDS, CATEGORY_TITLES, KNOWN_CATEGORIES, NOVICE_LABEL, toRomanNumeral } from '../modules/missions/achievements.config';
 
 @Injectable()
 export class MissionsService {

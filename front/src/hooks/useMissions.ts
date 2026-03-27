@@ -9,7 +9,7 @@ import {
   setScopedStorageItem,
 } from '../utils/userStorage';
 import { maintainStorageHealth } from '../utils/storageOptimization';
-import { batchedFetch, progressiveLoad } from '../utils/requestQueue';
+import { progressiveLoad } from '../utils/requestQueue';
 
 const API_URL = 'http://localhost:3001/api';
 const INVENTORY_EVENT = 'inventory:updated';
@@ -718,7 +718,7 @@ export function useMissions() {
             priority: 'high',
           },
         ],
-        (key, data) => {
+        (key, _data) => {
           console.log(`Loaded: ${key}`);
         }
       );

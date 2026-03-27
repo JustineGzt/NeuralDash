@@ -3,6 +3,8 @@ import { TopHeader } from '../components/TopHeader';
 import { InventoryPanel } from '../components/InventoryPanel';
 import { useAuth } from '../hooks/useAuth';
 import { getScopedStorageItem, setScopedStorageItem } from '../utils/userStorage';
+import { applyNeedsBoost } from '../utils/needsState';
+import type { NeedEffects } from '../types/needs';
 
 interface Item {
   id: string;
@@ -27,6 +29,18 @@ interface Module {
 const INVENTORY_KEY = 'playerInventory';
 const MODULES_KEY = 'equippedModules';
 const XP_STORAGE_KEY = 'playerXpTotal';
+
+const CONSUMABLE_NEED_BOOSTS: Record<string, NeedEffects> = {
+  'shop-drink-ultimate-01': {
+    hunger: 22,
+    thirst: 22,
+    engagement: 22,
+    productivity: 22,
+    energy: 22,
+    focus: 22,
+    mood: 22,
+  },
+};
 
 export const Inventaire = () => {
   const { user, loading: authLoading } = useAuth();
@@ -99,6 +113,11 @@ export const Inventaire = () => {
     if (!selectedItem) return;
     const nextInventory = applyInventoryChange(selectedItem.id, -1);
     if (!nextInventory) return;
+
+    const needBoost = CONSUMABLE_NEED_BOOSTS[selectedItem.id];
+    if (needBoost) {
+      applyNeedsBoost(needBoost, `item:${selectedItem.id}`, user?.uid);
+    }
 
     if (selectedItem.type === 'Progression' || selectedItem.name.toLowerCase().includes('xp')) {
       applyXpGain(15);

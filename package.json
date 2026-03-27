@@ -1,0 +1,14 @@
+{
+  "name": "progression-workspace",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "pnpm --filter ./front run dev",
+    "dev:front": "pnpm --filter ./front run dev",
+    "dev:back": "pnpm --filter ./back run dev",
+    "build": "pnpm --filter ./back run build && pnpm --filter ./front run build",
+    "build:front": "pnpm --filter ./front run build",
+    "build:back": "pnpm --filter ./back run build",
+    "lint": "pnpm --filter ./front run lint"
+  }
+}
